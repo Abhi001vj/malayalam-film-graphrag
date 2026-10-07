@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "malayalam-film-graphrag"
+version = "0.1.0"
+description = "Source-grounded graph and story search for Malayalam cinema"
+requires-python = ">=3.11"
+dependencies = ["neo4j>=5.0.0"]
+
+[project.optional-dependencies]
+vectors = ["sentence-transformers>=3,<6"]
+
+[project.scripts]
+filmgraph = "filmgraph.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+filmgraph = ["static/*"]
+
