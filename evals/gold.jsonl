@@ -1,0 +1,50 @@
+{"question": "How many movies did Mohanlal and Mammootty work together in?", "intent": "collaboration", "people": [{"id": "wiki:Mohanlal", "roles": []}, {"id": "wiki:Mammootty", "roles": []}], "slots": null}
+{"question": "how many films have mamooty and mohanlal done together", "intent": "collaboration", "people": [{"id": "wiki:Mammootty", "roles": []}, {"id": "wiki:Mohanlal", "roles": []}], "slots": null}
+{"question": "Mohanlal actor and Priyadarshan director", "intent": "collaboration", "people": [{"id": "wiki:Mohanlal", "roles": ["actor"]}, {"id": "wiki:Priyadarsan", "roles": ["director"]}], "slots": null}
+{"question": "How many films did Priyadarshan direct with Mohanlal in the lead?", "intent": "collaboration", "people": [{"id": "wiki:Priyadarsan", "roles": ["director"]}, {"id": "wiki:Mohanlal", "roles": ["actor"]}], "slots": null}
+{"question": "Sreenivasan writer and Mohanlal actor", "intent": "collaboration", "people": [{"id": "wiki:Sreenivasan", "roles": ["writer"]}, {"id": "wiki:Mohanlal", "roles": ["actor"]}], "slots": null}
+{"question": "films directed by Sathyan Anthikad starring Jayaram", "intent": "collaboration", "people": [{"id": "wiki:Sathyan_Anthikad", "roles": ["director"]}, {"id": "wiki:Jayaram", "roles": ["actor"]}], "slots": null}
+{"question": "Prem Nazir and Sheela movies", "intent": "collaboration", "people": [{"id": "Q2735277", "roles": []}, {"id": "wiki:Sheela", "roles": []}], "slots": null}
+{"question": "how many times did Fahadh Faasil act with Dulquer Salmaan", "intent": "collaboration", "people": [{"id": "wiki:Fahad_Faasil", "roles": ["actor"]}, {"id": "wiki:Dulquer_Salmaan", "roles": ["actor"]}], "slots": null}
+{"question": "Dileep and Lal Jose films", "intent": "collaboration", "people": [{"id": "wiki:Dileep", "roles": []}, {"id": "wiki:Lal_Jose", "roles": []}], "slots": null}
+{"question": "Jagathy Sreekumar Innocent Mohanlal films together", "intent": "collaboration", "people": [{"id": "wiki:Jagathi_Sreekumar", "roles": []}, {"id": "wiki:Innocent_(Actor)", "roles": []}, {"id": "wiki:Mohanlal", "roles": []}], "slots": null}
+{"question": "Mammootty and Joshiy movies in the 80s", "intent": "collaboration", "people": [{"id": "wiki:Mammootty", "roles": []}, {"id": "wiki:Joshi_(director)", "roles": []}], "slots": {"year_from": 1980, "year_to": 1989}}
+{"question": "count of films with Kunchacko Boban and Prithviraj Sukumaran", "intent": "collaboration", "people": [{"id": "wiki:Kunchacko_Boban", "roles": []}, {"id": "wiki:Prithviraj_(actor)", "roles": []}], "slots": null}
+{"question": "films written by M. T. Vasudevan Nair starring Mammootty", "intent": "collaboration", "people": [{"id": "wiki:M._T._Vasudevan_Nair", "roles": ["writer"]}, {"id": "wiki:Mammootty", "roles": ["actor"]}], "slots": null}
+{"question": "did Nivin Pauly and Urvashi ever work together", "intent": "collaboration", "people": [{"id": "wiki:Nivin_Pauly", "roles": []}, {"id": "wiki:Urvashi", "roles": []}], "slots": null}
+{"question": "Tovino Thomas with Basil Joseph", "intent": "collaboration", "people": [{"id": "wiki:Tovino_Thomas", "roles": []}, {"id": "wiki:Basil_Joseph", "roles": []}], "slots": null}
+{"question": "Mohanlal movies in the 90s", "intent": "filmography", "people": [{"id": "wiki:Mohanlal", "roles": []}], "slots": {"year_from": 1990, "year_to": 1999}}
+{"question": "Mohan lal films in the 1990s", "intent": "filmography", "people": [{"id": "wiki:Mohanlal", "roles": []}], "slots": {"year_from": 1990, "year_to": 1999}}
+{"question": "how many films has Sibi Malayil directed", "intent": "filmography", "people": [{"id": "wiki:Sibi_Malayil", "roles": ["director"]}], "slots": null}
+{"question": "films of Fahadh Faasil", "intent": "filmography", "people": [{"id": "wiki:Fahad_Faasil", "roles": []}], "slots": null}
+{"question": "what movies did Sushin Shyam compose music for", "intent": "filmography", "people": [{"id": "Q29453931", "roles": ["music_director"]}], "slots": null}
+{"question": "films written by Syam Pushkaran", "intent": "filmography", "people": [{"id": "Q21063731", "roles": ["writer"]}], "slots": null}
+{"question": "Dileesh Pothan as director", "intent": "filmography", "people": [{"id": "wiki:Dileesh_Pothan", "roles": ["director"]}], "slots": null}
+{"question": "movies shot by Venu", "intent": "filmography", "people": [{"id": "wiki:Venu_(cinematographer)", "roles": ["cinematographer"]}], "slots": null}
+{"question": "I. V. Sasi films after 1985", "intent": "filmography", "people": [{"id": "wiki:I.V._Sasi", "roles": []}], "slots": {"year_from": 1986}}
+{"question": "who has Mammootty worked with the most", "intent": "top_collaborators", "people": [{"id": "wiki:Mammootty", "roles": []}], "slots": null}
+{"question": "which director has Mohanlal worked with most", "intent": "top_collaborators", "people": [{"id": "wiki:Mohanlal", "roles": ["director"]}], "slots": null}
+{"question": "frequent collaborators of Sukumari", "intent": "top_collaborators", "people": [{"id": "wiki:Sukumari", "roles": []}], "slots": null}
+{"question": "Who directed Chemmeen?", "intent": "film_crew", "people": [], "slots": null, "film": "Q3595616", "answer_contains": ["Ramu Kariat"]}
+{"question": "who directed Manichitrathazhu", "intent": "film_crew", "people": [], "slots": null, "film": "wiki:Manichitrathazhu", "answer_contains": ["Fazil"]}
+{"question": "who composed the music for Spadikam", "intent": "film_crew", "people": [], "slots": null, "film": "wiki:Spadikam"}
+{"question": "music director of Premam", "intent": "film_crew", "people": [], "slots": null, "film": "wiki:Premam"}
+{"question": "who wrote Nadodikkattu", "intent": "film_crew", "people": [], "slots": null, "film": "Q6957926", "answer_contains": ["Sreenivasan"]}
+{"question": "tell me about Thanmathra", "intent": "film_info", "people": [], "slots": null, "film": "wiki:Thanmathra"}
+{"question": "cast of Ustad Hotel", "intent": "film_info", "people": [], "slots": null, "film": "wiki:Ustad_Hotel"}
+{"question": "songs sung by K. J. Yesudas composed by Raveendran", "intent": "songs", "people": [{"id": "wiki:K.J_Yesudas", "roles": ["singer"]}, {"id": "wiki:Raveendran", "roles": ["music_director"]}], "slots": null}
+{"question": "Chithra songs with lyrics by O. N. V. Kurup", "intent": "songs", "people": [{"id": "wiki:Chithra", "roles": []}, {"id": "wiki:O._N._V._Kurup", "roles": ["lyricist"]}], "slots": null}
+{"question": "songs of G. Devarajan and Vayalar Ramavarma", "intent": "songs", "people": [{"id": "wiki:Devarajan", "roles": []}, {"id": "wiki:Vayalar_Ramavarma", "roles": []}], "slots": null}
+{"question": "How is Fahadh Faasil connected to Prem Nazir?", "intent": "connection_path", "people": [{"id": "wiki:Fahad_Faasil", "roles": []}, {"id": "Q2735277", "roles": []}], "slots": null}
+{"question": "degrees of separation between Tovino Thomas and Sheela", "intent": "connection_path", "people": [{"id": "wiki:Tovino_Thomas", "roles": []}, {"id": "wiki:Sheela", "roles": []}], "slots": null}
+{"question": "Which films are remakes of Manichitrathazhu?", "intent": "relation_query", "people": [], "slots": null}
+{"question": "films based on novels", "intent": "relation_query", "people": [], "slots": null}
+{"question": "films like Kireedam", "intent": "similar_films", "people": [], "slots": null, "film": "Q13111257"}
+{"question": "recommend something similar to Premam", "intent": "similar_films", "people": [], "slots": null, "film": "wiki:Premam"}
+{"question": "what were the major filmmaker circles in the 80s", "intent": "global_overview", "people": [], "slots": null}
+{"question": "give me an overview of new generation malayalam cinema", "intent": "global_overview", "people": [], "slots": null}
+{"question": "movie where a family hides a murder from the police", "intent": "plot_search", "people": [], "slots": null}
+{"question": "hello", "intent": "help", "people": [], "slots": null}
+{"question": "what can you do", "intent": "help", "people": [], "slots": null}
+{"question": "this answer is wrong, I want a human", "intent": "handover", "people": [], "slots": null}
+{"question": "what is the weather in kochi today", "intent": "out_of_scope", "people": [], "slots": null}

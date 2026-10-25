@@ -1,0 +1,2 @@
+"""Malayalam film GraphRAG prototype."""
+

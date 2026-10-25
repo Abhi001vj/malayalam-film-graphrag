@@ -1,0 +1,37 @@
+[
+  {
+    "id": "demo:kilukkam-1991",
+    "title": "Kilukkam",
+    "year": 1991,
+    "language": "Malayalam",
+    "wikipedia_url": "https://en.wikipedia.org/wiki/Kilukkam",
+    "imdb_id": "tt0255306",
+    "credits": [
+      {"person": {"id": "demo:mohanlal", "name": "Mohanlal"}, "role": "actor", "character": "Joji", "source_url": "https://en.wikipedia.org/wiki/Kilukkam"},
+      {"person": {"id": "demo:jagathy", "name": "Jagathy Sreekumar", "aliases": ["Jagathy", "Jagathi Sreekumar", "Jagathi"]}, "role": "actor", "character": "Nischal", "source_url": "https://en.wikipedia.org/wiki/Kilukkam"},
+      {"person": {"id": "demo:revathi", "name": "Revathi"}, "role": "actor", "character": "Nandini", "source_url": "https://en.wikipedia.org/wiki/Kilukkam"},
+      {"person": {"id": "demo:priyadarshan", "name": "Priyadarshan", "aliases": ["Priyadarsan"]}, "role": "director", "source_url": "https://en.wikipedia.org/wiki/Kilukkam"},
+      {"person": {"id": "demo:venu", "name": "Venu Nagavally"}, "role": "writer", "source_url": "https://en.wikipedia.org/wiki/Kilukkam"}
+    ],
+    "documents": [
+      {"kind": "plot", "text": "In Ooty, tourist guide Joji and his photographer friend Nischal encounter Nandini, a woman who pretends to be mentally unwell. She stays with Joji while the two men try to understand her past and the reasons for her behavior.", "source_url": "https://en.wikipedia.org/wiki/Kilukkam", "license": "Wikipedia-derived paraphrase; source page CC BY-SA"}
+    ]
+  },
+  {
+    "id": "demo:kadinjool-kalyanam-1991",
+    "title": "Kadinjool Kalyanam",
+    "year": 1991,
+    "language": "Malayalam",
+    "wikipedia_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam",
+    "credits": [
+      {"person": {"id": "demo:jayaram", "name": "Jayaram"}, "role": "actor", "character": "Sudhakaran", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam"},
+      {"person": {"id": "demo:jagathy", "name": "Jagathy Sreekumar", "aliases": ["Jagathy", "Jagathi Sreekumar", "Jagathi"]}, "role": "actor", "character": "Sivaraman", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam"},
+      {"person": {"id": "demo:urvashi", "name": "Urvashi"}, "role": "actor", "character": "Hridayakumari", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam"},
+      {"person": {"id": "demo:rajasenan", "name": "Rajasenan"}, "role": "director", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam"},
+      {"person": {"id": "demo:reghunath", "name": "Reghunath Paleri"}, "role": "writer", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam"}
+    ],
+    "documents": [
+      {"kind": "plot", "text": "Bus office manager Sudhakaran loses his first love after his father's palm reading predicts that marriage will end in his death. He later marries Hridayakumari. Frustrated by their difficult marriage, he hires killers, then learns she is pregnant and desperately tries to stop the plan.", "source_url": "https://en.wikipedia.org/wiki/Kadinjool_Kalyanam", "license": "Wikipedia-derived paraphrase; source page CC BY-SA"}
+    ]
+  }
+]

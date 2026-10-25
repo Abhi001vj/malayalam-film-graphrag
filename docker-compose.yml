@@ -1,19 +1,15 @@
-version: '3.8'
-
+# Local Neo4j for the GraphRAG backend. Same Cypher runs on Neo4j AuraDB Free
+# (set NEO4J_URI=neo4j+s://<id>.databases.neo4j.io and credentials in .env).
 services:
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5.26-community
     ports:
-      - "7474:7474" # HTTP UI
-      - "7687:7687" # Bolt protocol
+      - "7474:7474" # Browser UI
+      - "7687:7687" # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/password
-      - NEO4J_apoc_export_file_enabled=true
-      - NEO4J_apoc_import_file_enabled=true
-      - NEO4J_apoc_import_file_use__neo4j__config=true
-      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_AUTH=neo4j/filmgraph-local
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512M
     volumes:
       - ./data/neo4j/data:/data
       - ./data/neo4j/logs:/logs
-      - ./data/neo4j/import:/var/lib/neo4j/import
-      - ./data/neo4j/plugins:/plugins
