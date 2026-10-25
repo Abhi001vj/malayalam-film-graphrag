@@ -1,0 +1,3 @@
+# Vercel serving: NumPy only (classifier ships as JSON weights; Neo4j optional).
+numpy>=1.26,<3
+neo4j>=5,<7

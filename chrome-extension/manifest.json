@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Malayalam FilmGraph",
+  "version": "0.2.0",
+  "description": "Explore Malayalam film collaborations, credits and your watchlist in a side panel.",
+  "minimum_chrome_version": "114",
+  "permissions": ["sidePanel", "storage"],
+  "action": {"default_title": "Open FilmGraph"},
+  "background": {"service_worker": "background.js"},
+  "side_panel": {"default_path": "panel.html"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'self'; frame-src http://127.0.0.1:8765 http://localhost:8765 https://*.vercel.app"}
+}

@@ -1,0 +1,19 @@
+{
+  "runs": 10,
+  "server_parser": {
+    "median_ms": 100.12,
+    "p95_ms": 935.4
+  },
+  "validated_plan": {
+    "median_ms": 27.64,
+    "p95_ms": 875.22
+  },
+  "sample_counts": {
+    "How many movies did Mohanlal and Mammootty work together in?": 63,
+    "Mohanlal actor and Priyadarshan director": 33,
+    "Sreenivasan writer and Mohanlal actor": 21,
+    "K J Yesudas singer": 683,
+    "Manichitrathazhu": 1
+  },
+  "scope": "Local, sequential, read-only core retrieval. Not production capacity; excludes HTTP/auth/quota/network/cold starts."
+}

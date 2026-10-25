@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "malayalam-film-graphrag"
-version = "0.1.0"
+version = "0.2.0"
 description = "Source-grounded graph and story search for Malayalam cinema"
 requires-python = ">=3.11"
-dependencies = ["neo4j>=5.0.0"]
+dependencies = ["beautifulsoup4>=4.12,<5", "numpy>=1.26"]
 
 [project.optional-dependencies]
 vectors = ["sentence-transformers>=3,<6"]
+neo4j = ["neo4j>=5,<7"]
+graphrag = ["scikit-learn>=1.4", "networkx>=3.2", "neo4j>=5,<7"]
 
 [project.scripts]
 filmgraph = "filmgraph.cli:main"
@@ -19,5 +21,5 @@ filmgraph = "filmgraph.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-filmgraph = ["static/*"]
+filmgraph = ["static/*", "models/*"]
 
