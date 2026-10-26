@@ -49,6 +49,12 @@ function traceView(data) {
 function cardView(card) {
   const c = el('article', 'film-card');
   c.append(el('div', 'film-number', (card.year || 'Year ?') + (card.imdb_rating ? ' · IMDb ' + card.imdb_rating : '')), el('h3', '', card.title));
+  if (card.evidence) {
+    const ev = el('div', 'evidence ' + (card.evidence.confirmed ? 'ok' : 'weak'),
+      (card.evidence.confirmed ? '✓ Confirmed on Wikipedia' : '⚠ Weak evidence') + ' · ' +
+      Object.entries(card.evidence.people).map(([n, v]) => `${n}: ${v.roles.join('/') || 'song'} (${v.sources.join(', ') || '?'})`).join(' · '));
+    c.append(ev);
+  }
   const people = [card.directors?.length ? 'Dir. ' + card.directors.join(', ') : '', card.music?.length ? 'Music ' + card.music.join(', ') : '', card.cast?.length ? card.cast.join(', ') : ''].filter(Boolean);
   c.append(el('div', 'film-people', people.join('\n')));
   if (card.plot) c.append(el('p', 'film-plot', card.plot.slice(0, 180) + (card.plot.length > 180 ? '…' : '')));
@@ -109,7 +115,9 @@ async function chat(question, overrides) {
 }
 
 // Chat submissions and suggestion chips go through the GraphRAG pipeline; filters/paging keep the catalogue search.
-runQuery = (q, opts = {}) => (opts.chat === false || opts.append) ? legacyQuery(q, opts) : chat(q || 'help');
+// Every question (typed, suggestion chip, ?q= link, page load) goes through the GraphRAG pipeline;
+// only "Show more films" paging keeps the old catalogue search.
+runQuery = (q, opts = {}) => opts.append ? legacyQuery(q, opts) : chat(q || 'help');
 const foot = $('.chat-foot');
 if (foot) {
   const controls = el('div', 'chat-controls');

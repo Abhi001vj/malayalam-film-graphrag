@@ -89,10 +89,17 @@ def answer(con: sqlite3.Connection, question: str, context: dict | None = None, 
         response.update(answer=f"“{a['text']}” matches more than one entry. Which one did you mean?",
                         clarify={'text': a['text'], 'options': a['options']}, flow='clarify_entity')
     elif needed and sum(e['type'] == needed[0] for e in entities) < needed[1]:
+        found = [e['name'] for e in entities if e['type'] == needed[0]]
+        used = {t for e in entities for t in nlu.normalize(e.get('text', '')).split()}
+        unknown = [t for t in nlu.normalize(question).split() if t not in used and t not in nlu._STOP and t not in nlu.ROLE_WORDS
+                   and not t.isdigit() and len(t) > 2 and t not in ('movies', 'films', 'film', 'movie', 'together', 'acted', 'worked')]
         what = {'PERSON': 'person' if needed[1] == 1 else 'two people', 'FILM': 'film'}[needed[0]]
-        response.update(answer=f"I can answer that as **{intent.replace('_', ' ')}**, but I need the {what}'s name. "
-                               f"I couldn't find it in the catalogue; could you rephrase or check the spelling?",
-                        flow='clarify_slot')
+        text = f"I can answer that as **{intent.replace('_', ' ')}**, which needs {what}."
+        if found:
+            text += f" I recognised **{', '.join(found)}**"
+        if unknown:
+            text += (' but' if found else ' I') + f" couldn't match “{' '.join(unknown[:3])}” to anyone in the catalogue. Try the full name (e.g. Mammootty)."
+        response.update(answer=text, flow='clarify_slot', unknown=unknown[:3])
     elif low and intent not in ('plot_search',):
         strikes = context.get('low_confidence', 0) + 1
         if strikes >= 2:
@@ -139,19 +146,61 @@ def _years(slots):
     return f" from {slots['year_from']}" if slots.get('year_from') else f" up to {slots['year_to']}" if slots.get('year_to') else ''
 
 
+def evidence(con, film_id, people) -> dict:
+    """How each queried person's credit on a film is sourced. 'confirmed' = on the film's Wikipedia page."""
+    per = {}
+    for p in people:
+        roles = p.get('roles') or []
+        sql = 'SELECT role, sources FROM kg_credits WHERE film_id=? AND person_id=?' + (' AND role IN (%s)' % ','.join('?' * len(roles)) if roles else '')
+        rows = con.execute(sql, [film_id, p['id'], *roles]).fetchall()
+        kinds = set(','.join(r[1] for r in rows).split(',')) - {''}
+        if not rows and con.execute('SELECT 1 FROM kg_song_credits c JOIN kg_songs s ON s.id=c.song_id WHERE s.film_id=? AND c.person_id=?', (film_id, p['id'])).fetchone():
+            kinds = {'wikipedia'}  # soundtrack tables come from the film page
+        per[p['name']] = {'roles': sorted({r[0] for r in rows}), 'sources': sorted(kinds)}
+    confirmed = all('wikipedia' in v['sources'] for v in per.values())
+    return {'confirmed': confirmed, 'people': per}
+
+
+def default_roles(con, people, trace) -> None:
+    """'Mohanlal and Mammootty movies' means films they both ACTED in (shared screen space), not any credit.
+    When no role was stated and everyone named is primarily an actor, require the actor role for all."""
+    if any(p['roles'] for p in people):
+        return
+    primary = {p['id']: (con.execute('SELECT primary_role FROM kg_people WHERE id=?', (p['id'],)).fetchone() or [None])[0] for p in people}
+    if all(r == 'actor' for r in primary.values()):
+        for p in people:
+            p['roles'] = ['actor']
+        trace.add('default_roles', time.perf_counter(), rule='all named people are primarily actors -> roles=[actor]', primary_roles=primary)
+
+
 def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
     people = _people(entities)
+    default_roles(con, people, trace)
     t = time.perf_counter()
     rows, query = store.films_with(people, slots.get('year_from'), slots.get('year_to'))
     trace.add('graph_query', t, backend=store.name, template='films_with', query=query, params=[p['id'] for p in people], rows=len(rows))
+    for r in rows:
+        r['evidence'] = evidence(con, r['id'], people)
+    rows.sort(key=lambda r: (not r['evidence']['confirmed'],))  # confirmed first, keeps year order within groups
+    confirmed = [r for r in rows if r['evidence']['confirmed']]
+    weak = [r for r in rows if not r['evidence']['confirmed']]
     names = ' and '.join(_who(p) for p in people)
     if not rows:
         text = f'I found **no films** in the catalogue crediting {names}{_years(slots)}.'
     else:
-        text = (f'**{len(rows)} film{"s" if len(rows) != 1 else ""}** credit {names}{_years(slots)}{_span(rows, slots)}. '
-                f'Most recent: {", ".join(r["title"] + " (" + str(r["year"]) + ")" for r in rows[:3])}.')
-    text += ' _Counted as distinct films in the imported catalogue; missing credits can lower it._'
-    return _films_response(con, text, rows, [p['id'] for p in people], trace)
+        text = (f'**{len(confirmed)} film{"s" if len(confirmed) != 1 else ""}** credit {names}{_years(slots)}{_span(confirmed or rows, slots)}, '
+                f'each confirmed by the film\'s Wikipedia page. '
+                + (f'Most recent: {", ".join(r["title"] + " (" + str(r["year"]) + ")" for r in confirmed[:3])}.' if confirmed else ''))
+        if weak:
+            text += (f'\n\n⚠ **{len(weak)} more** rest only on Wikidata/IMDb claims and may be cameos, voice-overs or data errors: '
+                     + ', '.join(f"{r['title']} ({r['year'] or '?'})" for r in weak[:6]) + ('…' if len(weak) > 6 else '') + '.')
+    trace.add('provenance', t, confirmed=len(confirmed), weak=len(weak))
+    out = _films_response(con, text, rows, [p['id'] for p in people], trace)
+    by_id = {r['id']: r['evidence'] for r in rows}
+    for card in out['cards']:
+        card['evidence'] = by_id.get(card['id'])
+    out['confirmed_total'] = len(confirmed)
+    return out
 
 
 def flow_filmography(con, store, q, entities, slots, use_llm, trace):
@@ -477,10 +526,14 @@ def flow_handover(con, store, q, entities, slots, use_llm, trace):
 def handover(con, question, reason, context) -> dict:
     """Human-in-the-loop: queue a ticket; post to Slack if SLACK_WEBHOOK_URL is configured."""
     ticket = {'at': time.strftime('%Y-%m-%dT%H:%M:%S'), 'question': question, 'reason': reason, 'context': context}
-    Path('data').mkdir(exist_ok=True)
-    with open('data/handover.jsonl', 'a') as fh:
-        fh.write(json.dumps(ticket, ensure_ascii=False) + '\n')
-    delivered = 'queued locally (data/handover.jsonl)'
+    delivered = 'not delivered (no handover channel configured)'
+    try:  # serverless filesystems are read-only; Slack is the hosted channel
+        Path('data').mkdir(exist_ok=True)
+        with open('data/handover.jsonl', 'a') as fh:
+            fh.write(json.dumps(ticket, ensure_ascii=False) + '\n')
+        delivered = 'queued locally (data/handover.jsonl)'
+    except OSError:
+        pass
     if os.getenv('SLACK_WEBHOOK_URL'):
         try:
             req = urllib.request.Request(os.environ['SLACK_WEBHOOK_URL'], json.dumps({'text': f'FilmGraph handover ({reason}): {question}'}).encode(),
@@ -552,17 +605,19 @@ def film_graph(con, film_ids, focus) -> dict:
         if not f:
             continue
         nodes[fid] = {'id': fid, 'label': f[0], 'year': f[1], 'group': 'film', 'url': f[2]}
-        credits = con.execute("""SELECT p.id, p.name, c.role, p.film_count FROM kg_credits c JOIN kg_people p ON p.id=c.person_id
+        credits = con.execute("""SELECT p.id, p.name, c.role, p.film_count, c.sources FROM kg_credits c JOIN kg_people p ON p.id=c.person_id
                                  WHERE c.film_id=? ORDER BY p.film_count DESC""", (fid,)).fetchall()
         chosen = [c for c in credits if c[0] in focus]
         chosen += [c for c in credits if c[0] not in focus and c[2] in ('director', 'writer', 'music_director')][:4]
         chosen += [c for c in credits if c[0] not in focus and c[2] == 'actor'][:3 if len(film_ids) > 20 else 5]
-        for pid, name, role, _ in chosen:
+        for pid, name, role, _, sources in chosen:
             node = nodes.setdefault(pid, {'id': pid, 'label': name, 'group': 'focus' if pid in focus else role, 'roles': []})
             if role not in node['roles']:
                 node['roles'].append(role)
             if (pid, fid, role) not in seen:
-                seen.add((pid, fid, role)); edges.append({'from': pid, 'to': fid, 'label': ROLE_LABEL(role), 'role': role})
+                weak = 'wikipedia' not in sources.split(',')
+                seen.add((pid, fid, role)); edges.append({'from': pid, 'to': fid, 'label': ROLE_LABEL(role), 'role': role,
+                                                          'sources': sources, 'dashes': weak})
         if len(film_ids) <= 12 and con.execute("SELECT 1 FROM sqlite_master WHERE name='kg_triples'").fetchone():
             for rel, obj, title, etype in con.execute("""SELECT t.relation, t.object_id, e.title, e.type FROM kg_triples t JOIN kg_entities e ON e.id=t.object_id
                     WHERE t.film_id=? AND t.subject_id=? AND t.relation!='MENTIONS' LIMIT 6""", (fid, fid)):

@@ -62,7 +62,7 @@ CREATE TABLE kg_people(id TEXT PRIMARY KEY, name TEXT NOT NULL, film_count INTEG
 CREATE TABLE kg_aliases(normalized TEXT NOT NULL, person_id TEXT NOT NULL, alias TEXT NOT NULL,
   PRIMARY KEY(normalized, person_id));
 CREATE TABLE kg_credits(film_id TEXT NOT NULL, person_id TEXT NOT NULL, role TEXT NOT NULL,
-  character_name TEXT NOT NULL DEFAULT '', PRIMARY KEY(film_id, person_id, role));
+  character_name TEXT NOT NULL DEFAULT '', sources TEXT NOT NULL DEFAULT '', PRIMARY KEY(film_id, person_id, role));
 CREATE TABLE kg_songs(id TEXT PRIMARY KEY, film_id TEXT NOT NULL, title TEXT NOT NULL);
 CREATE TABLE kg_song_credits(song_id TEXT NOT NULL, person_id TEXT NOT NULL, role TEXT NOT NULL,
   PRIMARY KEY(song_id, person_id, role));
@@ -101,6 +101,10 @@ class UnionFind:
 def _id_rank(i: str) -> tuple:
     order = 0 if i.startswith('wiki:') else 1 if i[:1] == 'Q' and i[1:].isdigit() else 2 if i.startswith('imdb:') else 3
     return order, len(i), i
+
+
+def _source_kind(url: str) -> str:
+    return 'imdb' if 'imdb' in url else 'wikidata' if 'wikidata.org' in url else 'wikipedia' if 'wikipedia.org' in url else 'other'
 
 
 def _title(film, enriched=frozenset()) -> str:
@@ -212,6 +216,12 @@ def build_kg(con: sqlite3.Connection) -> dict:
 
     junk = {r[0] for r in con.execute('SELECT id, name FROM people') if normalize(r[1]) in NOT_PEOPLE or r[1].lstrip().startswith('&')}
     person_map = {p: c for p, c in person_map.items() if p not in junk and c not in junk}
+    # Provenance per canonical edge: which independent sources assert it (wikipedia / wikidata / imdb).
+    sources = defaultdict(set)
+    for r in con.execute('SELECT film_id, person_id, role, source_url FROM credit_sources UNION ALL SELECT film_id, person_id, role, source_url FROM credits'):
+        role = ROLE_MAP.get(r['role'])
+        if role and r['film_id'] in film_map and r['person_id'] in person_map:
+            sources[(film_map[r['film_id']], person_map[r['person_id']], role)].add(_source_kind(r['source_url']))
     seen = set()
     for r in con.execute('SELECT film_id, person_id, role, character_name FROM credits'):
         role = ROLE_MAP.get(r['role'])
@@ -220,7 +230,7 @@ def build_kg(con: sqlite3.Connection) -> dict:
         key = (film_map[r['film_id']], person_map[r['person_id']], role)
         if key not in seen:
             seen.add(key)
-            con.execute('INSERT INTO kg_credits VALUES(?,?,?,?)', (*key, r['character_name'] or ''))
+            con.execute('INSERT INTO kg_credits VALUES(?,?,?,?,?)', (*key, r['character_name'] or '', ','.join(sorted(sources[key]))))
     for r in con.execute('SELECT id, film_id, title FROM songs'):
         if r['film_id'] in film_map:
             con.execute('INSERT OR IGNORE INTO kg_songs VALUES(?,?,?)', (r['id'], film_map[r['film_id']], r['title']))

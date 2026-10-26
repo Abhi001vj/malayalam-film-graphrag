@@ -59,10 +59,10 @@ def load(con: sqlite3.Connection, driver, database='neo4j', wipe=True, log=print
     push('UNWIND $rows AS r MERGE (p:Person {id: r.id}) SET p += r',
          [dict(r) for r in con.execute('SELECT id, name, film_count, primary_role, wikipedia_url, resolution FROM kg_people')], 'people')
     for role, rel in REL_TYPES.items():
-        rows = [dict(r) for r in con.execute('SELECT person_id p, film_id f, character_name c FROM kg_credits WHERE role=?', (role,))]
+        rows = [dict(r) for r in con.execute('SELECT person_id p, film_id f, character_name c, sources s FROM kg_credits WHERE role=?', (role,))]
         if rows:
             push(f"""UNWIND $rows AS r MATCH (p:Person {{id: r.p}}), (f:Film {{id: r.f}})
-                     MERGE (p)-[x:{rel}]->(f) SET x.role = '{role}', x.character = r.c""", rows, rel)
+                     MERGE (p)-[x:{rel}]->(f) SET x.role = '{role}', x.character = r.c, x.sources = split(r.s, ',')""", rows, rel)
     push('UNWIND $rows AS r MATCH (f:Film {id: r.film_id}) MERGE (s:Song {id: r.id}) SET s.title = r.title MERGE (s)-[:IN_FILM]->(f)',
          [dict(r) for r in con.execute('SELECT id, film_id, title FROM kg_songs')], 'songs')
     for role, rel in {'singer': 'SANG', 'lyricist': 'WROTE_LYRICS', 'music_director': 'COMPOSED'}.items():

@@ -129,6 +129,26 @@ TEMPLATES = {
 }
 
 
+# Fan names and common spellings that no source records as aliases (Malayalam cinema usage).
+NICKNAMES = {
+    'Mammootty': ['mammookka', 'mammukka', 'mamookka', 'mamukka', 'mammooka', 'ikka', 'mammotty', 'mamootty', 'mammuty', 'megastar'],
+    'Mohanlal': ['lalettan', 'laletten', 'lal ettan', 'mohan lal', 'mohanlal sir', 'complete actor'],
+    'Dulquer Salmaan': ['dq', 'dulqar', 'dulquer salman', 'kunjikka'],
+    'Fahadh Faasil': ['fafa', 'fahad', 'fahad fazil', 'fahadh fazil'],
+    'Prithviraj Sukumaran': ['prithvi', 'raju ettan', 'prithviraj'],
+    'Suresh Gopi': ['sg', 'suresh gopi sir'],
+    'Kunchacko Boban': ['chackochan', 'chakkochan'],
+    'Jagathy Sreekumar': ['jagathy', 'jagathi'],
+    'Nivin Pauly': ['nivin'],
+    'Tovino Thomas': ['tovino'],
+    'K. J. Yesudas': ['yesudas', 'dasettan', 'gaanagandharvan', 'kj yesudas'],
+    'K. S. Chithra': ['chitra', 'ks chithra', 'chithra chechi'],
+    'Prem Nazir': ['nazir', 'nithyaharitha nayakan'],
+    'Sreenivasan': ['sreeni', 'srinivasan'],
+    'Priyadarshan': ['priyan', 'priyadarsan'],
+}
+
+
 class Gazetteer:
     """Longest-match dictionary NER over KG names, aliases, titles, places, technologies."""
 
@@ -166,8 +186,15 @@ class Gazetteer:
                 if len(n) >= 4 and n not in common:
                     self._add(n, {'type': {'Place': 'PLACE', 'Award': 'AWARD', 'Work': 'WORK', 'Organization': 'ORG'}[r['type']],
                                   'id': r['id'], 'name': r['title'], 'weight': r['n']})
+        for name, nicks in NICKNAMES.items():
+            row = con.execute('SELECT id, name, film_count FROM kg_people WHERE name=? ORDER BY film_count DESC LIMIT 1', (name,)).fetchone()
+            if row:
+                for nick in nicks:
+                    entry = {'type': 'PERSON', 'id': row[0], 'name': row[1], 'weight': row[2] + 10_000, 'exact': True, 'nickname': True}
+                    self.entries[normalize(nick)] = [entry] + [e for e in self.entries.get(normalize(nick), []) if e['type'] != 'PERSON']
         self.max_len = max(len(k.split()) for k in self.entries)
         self.fuzzy_pool = {k: v for k, v in self.entries.items() if any(e['type'] == 'PERSON' and e['weight'] >= 5 for e in v)}
+        # e.g. "mamokka" is closest to the nickname "mamookka"; fuzzy matches only see well-attested people/nicknames
 
     def _add(self, key, entry):
         self.entries.setdefault(key, []).append(entry)

@@ -27,6 +27,11 @@ from filmgraph.graphstore import SQLiteStore, open_store  # noqa: E402
 def truth_count(con, people, slots):
     """Ground truth: distinct films where every person holds one of their roles (film or song level)."""
     sets = []
+    # Same semantics the product promises: actors named without a role means films they both acted in.
+    if len(people) > 1 and not any(p['roles'] for p in people):
+        primary = [(con.execute('SELECT primary_role FROM kg_people WHERE id=?', (p['id'],)).fetchone() or [None])[0] for p in people]
+        if all(r == 'actor' for r in primary):
+            people = [{**p, 'roles': ['actor']} for p in people]
     for p in people:
         roles = p['roles']
         q = 'SELECT film_id FROM kg_credits WHERE person_id=?' + (' AND role IN (%s)' % ','.join('?' * len(roles)) if roles else '')

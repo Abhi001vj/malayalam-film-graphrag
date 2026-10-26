@@ -13,28 +13,11 @@
     "crew_answers": "3/3",
     "film_linking": "9/9",
     "methods": {
-      "rule": 21,
-      "classifier": 29
+      "classifier": 29,
+      "rule": 21
     },
-    "latency_ms_p50": 16.4,
-    "latency_ms_p95": 312.7,
-    "failures": []
-  },
-  "pipeline_with_llm_fallback": {
-    "cases": 50,
-    "intent_accuracy": 1.0,
-    "entity_precision": 1.0,
-    "entity_recall": 1.0,
-    "entity_f1": 1.0,
-    "count_exact": "24/24",
-    "crew_answers": "3/3",
-    "film_linking": "9/9",
-    "methods": {
-      "rule": 21,
-      "classifier": 29
-    },
-    "latency_ms_p50": 17.5,
-    "latency_ms_p95": 1254.7,
+    "latency_ms_p50": 20.2,
+    "latency_ms_p95": 295.5,
     "failures": []
   },
   "plot_retrieval": {
@@ -42,19 +25,19 @@
       "hit@1": 0.586,
       "hit@5": 0.759,
       "mrr": 0.658,
-      "latency_ms_p50": 2.5
+      "latency_ms_p50": 2.4
     },
     "vector": {
       "hit@1": 0.655,
       "hit@5": 0.862,
       "mrr": 0.73,
-      "latency_ms_p50": 11.4
+      "latency_ms_p50": 11.0
     },
     "hybrid": {
       "hit@1": 0.655,
       "hit@5": 0.862,
       "mrr": 0.725,
-      "latency_ms_p50": 13.2
+      "latency_ms_p50": 13.3
     }
   },
   "backend_parity": {
