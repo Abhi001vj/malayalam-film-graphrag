@@ -154,9 +154,11 @@ def evidence(con, film_id, people) -> dict:
         sql = 'SELECT role, sources FROM kg_credits WHERE film_id=? AND person_id=?' + (' AND role IN (%s)' % ','.join('?' * len(roles)) if roles else '')
         rows = con.execute(sql, [film_id, p['id'], *roles]).fetchall()
         kinds = set(','.join(r[1] for r in rows).split(',')) - {''}
-        if not rows and con.execute('SELECT 1 FROM kg_song_credits c JOIN kg_songs s ON s.id=c.song_id WHERE s.film_id=? AND c.person_id=?', (film_id, p['id'])).fetchone():
-            kinds = {'wikipedia'}  # soundtrack tables come from the film page
-        per[p['name']] = {'roles': sorted({r[0] for r in rows}), 'sources': sorted(kinds)}
+        song_sql = 'SELECT DISTINCT c.role FROM kg_song_credits c JOIN kg_songs s ON s.id=c.song_id WHERE s.film_id=? AND c.person_id=?'
+        song_roles = {r[0] for r in con.execute(song_sql + (' AND c.role IN (%s)' % ','.join('?' * len(roles)) if roles else ''), [film_id, p['id'], *roles])}
+        if song_roles:
+            kinds.add('wikipedia')  # soundtrack tables come from the film's own page
+        per[p['name']] = {'roles': sorted({r[0] for r in rows} | song_roles), 'sources': sorted(kinds)}
     confirmed = all('wikipedia' in v['sources'] for v in per.values())
     return {'confirmed': confirmed, 'people': per}
 
@@ -171,20 +173,53 @@ def default_roles(con, people, trace) -> None:
         for p in people:
             p['roles'] = ['actor']
         trace.add('default_roles', time.perf_counter(), rule='all named people are primarily actors -> roles=[actor]', primary_roles=primary)
+    else:
+        trace.add('default_roles', time.perf_counter(), rule='mixed professions -> any credit; answer breaks down role pairings',
+                  primary_roles=primary)
+
+
+def _fact_filters(con, store, entities, trace):
+    """Places, technologies, genres and companies named alongside people become extra graph constraints."""
+    facts, film_sets, labels = {}, [], []
+    for e in entities:
+        kind = {'PLACE': 'location', 'TECH': 'technology', 'GENRE': 'genre', 'ORG': 'company'}.get(e['type'])
+        if not kind:
+            continue
+        labels.append(e['name'])
+        if e['id'].startswith('wiki:'):
+            got, _ = store.related(None, object_id=e['id'], limit=2000)
+            film_sets.append({r['film_id'] for r in got})
+        else:
+            facts[kind] = e['id']
+    if labels:
+        trace.add('attribute_constraints', time.perf_counter(), facts=facts, linked_entities=len(film_sets))
+    return facts, film_sets, labels
+
+
+def relationship_breakdown(rows, people) -> list[tuple[str, int]]:
+    """How the people were connected on each film: 'Mohanlal actor × M. G. Sreekumar singer' -> n films."""
+    combos = Counter()
+    for r in rows:
+        per = r['evidence']['people']
+        combos[' × '.join(f"{name} {'/'.join(ROLE_LABEL(x) for x in v['roles']) or 'credited'}" for name, v in per.items())] += 1
+    return combos.most_common(6)
 
 
 def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
     people = _people(entities)
     default_roles(con, people, trace)
+    facts, film_sets, labels = _fact_filters(con, store, entities, trace)
     t = time.perf_counter()
-    rows, query = store.films_with(people, slots.get('year_from'), slots.get('year_to'))
+    rows, query = store.films_with(people, slots.get('year_from'), slots.get('year_to'), facts or None)
+    for allowed in film_sets:
+        rows = [r for r in rows if r['id'] in allowed]
     trace.add('graph_query', t, backend=store.name, template='films_with', query=query, params=[p['id'] for p in people], rows=len(rows))
     for r in rows:
         r['evidence'] = evidence(con, r['id'], people)
     rows.sort(key=lambda r: (not r['evidence']['confirmed'],))  # confirmed first, keeps year order within groups
     confirmed = [r for r in rows if r['evidence']['confirmed']]
     weak = [r for r in rows if not r['evidence']['confirmed']]
-    names = ' and '.join(_who(p) for p in people)
+    names = ' and '.join(_who(p) for p in people) + (f" ({', '.join(labels)})" if labels else '')
     if not rows:
         text = f'I found **no films** in the catalogue crediting {names}{_years(slots)}.'
     else:
@@ -194,7 +229,10 @@ def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
         if weak:
             text += (f'\n\n⚠ **{len(weak)} more** rest only on Wikidata/IMDb claims and may be cameos, voice-overs or data errors: '
                      + ', '.join(f"{r['title']} ({r['year'] or '?'})" for r in weak[:6]) + ('…' if len(weak) > 6 else '') + '.')
-    trace.add('provenance', t, confirmed=len(confirmed), weak=len(weak))
+    breakdown = relationship_breakdown(rows, people)
+    if len(people) > 1 and breakdown:
+        text += f'\n\n**How they worked together** (all {len(rows)} films):\n' + '\n'.join(f'- {combo}: **{n}** film{"s" if n != 1 else ""}' for combo, n in breakdown)
+    trace.add('provenance', t, confirmed=len(confirmed), weak=len(weak), breakdown=breakdown)
     out = _films_response(con, text, rows, [p['id'] for p in people], trace)
     by_id = {r['id']: r['evidence'] for r in rows}
     for card in out['cards']:
@@ -205,12 +243,15 @@ def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
 
 def flow_filmography(con, store, q, entities, slots, use_llm, trace):
     people = _people(entities)[:1]
+    facts, film_sets, labels = _fact_filters(con, store, entities, trace)
     t = time.perf_counter()
-    rows, query = store.films_with(people, slots.get('year_from'), slots.get('year_to'))
+    rows, query = store.films_with(people, slots.get('year_from'), slots.get('year_to'), facts or None)
+    for allowed in film_sets:
+        rows = [r for r in rows if r['id'] in allowed]
     trace.add('graph_query', t, backend=store.name, template='films_with', query=query, params=[people[0]['id']], rows=len(rows))
     roles = Counter(r[0] for r in con.execute('SELECT role FROM kg_credits WHERE person_id=?', (people[0]['id'],)))
     role_text = ', '.join(f'{ROLE_LABEL(r)} ×{n}' for r, n in roles.most_common(4))
-    text = (f"**{_who(people[0])}** has **{len(rows)} film{'s' if len(rows) != 1 else ''}**{_years(slots)}{_span(rows, slots)} in the catalogue"
+    text = (f"**{_who(people[0])}** has **{len(rows)} film{'s' if len(rows) != 1 else ''}**{' linked to ' + ', '.join(labels) if labels else ''}{_years(slots)}{_span(rows, slots)} in the catalogue"
             + (f' (credits: {role_text})' if role_text and not people[0]['roles'] else '') + '.')
     if rows:
         text += f' Latest: {", ".join(r["title"] + " (" + str(r["year"]) + ")" for r in rows[:3])}.'
@@ -383,6 +424,10 @@ def flow_by_attribute(con, store, q, entities, slots, use_llm, trace):
             facts[kind] = e['id']
     t = time.perf_counter()
     rows, query = store.films_with(_people(entities), slots.get('year_from'), slots.get('year_to'), facts or None) if (facts or not triple_ids) else ([], '')
+    people = _people(entities)
+    if triple_ids and people:  # a place/company AND a person: both constraints must hold
+        allowed, _ = store.films_with(people, slots.get('year_from'), slots.get('year_to'), limit=5000)
+        triple_ids &= {r['id'] for r in allowed}
     if triple_ids:
         extra = con.execute(f"SELECT id, title, year FROM kg_films WHERE id IN ({','.join('?' * len(triple_ids))}) ORDER BY year DESC", list(triple_ids)).fetchall()
         rows += [dict(zip(('id', 'title', 'year'), r)) for r in extra
@@ -557,20 +602,22 @@ FLOWS = {'collaboration': flow_collaboration, 'filmography': flow_filmography, '
 
 def _films_response(con, text, rows, focus, trace):
     t = time.perf_counter()
-    cards = [film_card(con, r['id']) for r in rows[:12]]
+    cards = [film_card(con, r['id'], focus) for r in rows[:12]]
     graph = film_graph(con, [r['id'] for r in rows[:60]], focus)
     trace.add('hydrate', t, cards=len(cards), nodes=len(graph['nodes']))
     return {'answer': text, 'cards': cards, 'graph': graph, 'total': len(rows),
             'film_ids': [r['id'] for r in rows]}
 
 
-def film_card(con, film_id) -> dict:
+def film_card(con, film_id, focus=()) -> dict:
     f = con.execute('SELECT * FROM kg_films WHERE id=?', (film_id,)).fetchone()
     if not f:
         return {'id': film_id, 'title': film_id}
     f = dict(zip([d[0] for d in con.execute('SELECT * FROM kg_films LIMIT 0').description], f))
     credits = con.execute("""SELECT p.name, c.role FROM kg_credits c JOIN kg_people p ON p.id=c.person_id WHERE c.film_id=?
                              ORDER BY c.role='director' DESC, p.film_count DESC""", (film_id,)).fetchall()
+    focus_names = {r[0] for r in con.execute(f"SELECT name FROM kg_people WHERE id IN ({','.join('?' * len(focus))})", list(focus))} if focus else set()
+    credits = sorted(credits, key=lambda c: c[0] not in focus_names)  # the people you asked about come first
     pick = lambda role, n: [name for name, r in credits if r == role][:n]
     plot = con.execute("SELECT text FROM kg_chunks WHERE film_id=? ORDER BY kind='plot' DESC, kind='lead' DESC, seq LIMIT 1", (film_id,)).fetchone()
     raw_ids = [r[0] for r in con.execute('SELECT film_id FROM kg_film_map WHERE canonical_id=?', (film_id,))]

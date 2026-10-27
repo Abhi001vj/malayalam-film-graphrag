@@ -57,11 +57,24 @@ def main() -> None:
     chat = sub.add_parser("chat", help="Interactive GraphRAG chat in the terminal")
     chat.add_argument("--no-llm", action="store_true")
     chat.add_argument("--backend", choices=["auto", "neo4j", "sqlite"], default="auto")
+    fb = sub.add_parser("feedback", help="Ratings summary and the correction review queue")
+    fb.add_argument("--accept", type=int, metavar="ID")
+    fb.add_argument("--reject", type=int, metavar="ID")
+    fb.add_argument("--note", default="")
     web = sub.add_parser("serve", help="Run local browser UI")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--vectors", action="store_true", help="Use built semantic vectors")
     args = parser.parse_args()
+    if args.command == "feedback":
+        from . import feedback
+        if args.accept or args.reject:
+            feedback.decide(args.accept or args.reject, "accepted" if args.accept else "rejected", args.note)
+        print(json.dumps(feedback.summary(), indent=2))
+        for item in feedback.review():
+            print(f"\n#{item['id']} [{item['created_at']}] Q: {item['question']}\n  answer: {item['answer_excerpt'][:160]}"
+                  f"\n  claims: {item['claimed_value']}  proof: {item['proof_url']}\n  says: {item['correction']}")
+        return
     if args.command == "serve":
         serve(str(args.db), args.host, args.port, args.vectors)
         return

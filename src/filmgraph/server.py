@@ -62,6 +62,9 @@ def make_handler(db_path: str, use_vectors: bool = False):
                         if quota is None:return
                         data=search(con,question,int(body.get('limit',20)),use_vectors,int(body.get('offset',0)),filters,query_plan=plan)
                         data['quota']=quota
+                    elif path=='/api/feedback':
+                        from .feedback import submit
+                        data=submit(self,body)
                     elif path=='/api/chat':
                         from .pipeline import answer
                         question=body.get('question','')

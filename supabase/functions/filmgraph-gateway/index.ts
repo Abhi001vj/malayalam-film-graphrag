@@ -27,6 +27,15 @@ Deno.serve(async req=>{
    if(error){console.error(error.code);return json({error:'Quota service unavailable'},503)}
    return json({...data,user:user?{id:user.id,email:user.email}:null});
   }
+  if(body.action==='feedback'){
+   // Ratings and corrections; the server validated the item. Reporter is pseudonymous (user id or HMAC of IP).
+   const reporter=user?'user:'+user.id:'guest:'+String(body.guest_key);
+   if(!user&&!/^[a-f0-9]{64}$/.test(body.guest_key||''))return json({error:'Invalid guest key'},400);
+   const {data,error}=await db.rpc('filmgraph_submit_feedback',{p_reporter:reporter,p_item:body.item});
+   if(error){console.error(error.code);return json({error:'Feedback service unavailable'},503)}
+   if(!data.stored)return json({error:data.error},429);
+   return json(data);
+  }
   if(body.action==='delete_account'){
    if(!user)return json({error:'Sign in first'},401);
    const {error:signoutError}=await db.auth.admin.signOut(body.access_token,'global');

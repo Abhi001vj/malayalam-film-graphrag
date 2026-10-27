@@ -40,6 +40,28 @@ More detail: [`docs/graphrag.md`](docs/graphrag.md) (architecture, diagram, desi
 | global overview | *What were the major filmmaker circles in the 80s?* | Louvain communities + community reports (GraphRAG global search) |
 | help / handover / out of scope | *talk to a human* | canned flows; handover writes a ticket and posts to Slack if configured |
 
+**Relationship-aware answers.**
+- *Actors named together* ("Mohanlal and Mammootty movies") means films **both acted in**.
+- *Mixed professions* ("Mohanlal and M. G. Sreekumar") counts any shared credit and breaks it down by pairing, e.g.
+  *Mohanlal actor × M. G. Sreekumar singer: 54 films · actor/singer × singer: 13*.
+- A person plus a place, technology, genre or company ("Mohanlal films shot in Ooty") must satisfy **both** constraints.
+
+**Provenance on every edge.** Each credit records which sources assert it (Wikipedia / Wikidata / IMDb):
+- answers count only films where every credit is on the film's own Wikipedia page (✓ confirmed);
+- Wikidata/IMDb-only links are listed separately with ⚠ and drawn as dashed edges in the graph.
+
+**Ratings and corrections.**
+- Every answer has 👍/👎 and *Suggest a correction*: what's wrong, the correct value, and a public https proof link
+  (required when a number or name is claimed).
+- Corrections go to a review queue; nothing a user submits changes the graph until a curator accepts it
+  (`filmgraph feedback`, `--accept ID` / `--reject ID`).
+- Storage: local runs use `data/feedback.sqlite3`; hosted runs use a private Supabase table through the signed gateway,
+  limited to 30 submissions/hour per reporter.
+
+**Walkthrough of one query through the code:** `python scripts/explain_query.py "mohanlal and mammokka movies"` writes
+[`docs/walkthrough.md`](docs/walkthrough.md). It covers every function that ran (`file:line`), its inputs and outputs, the
+Cypher, row counts and provenance.
+
 Follow-ups carry context: *"Mohanlal and Mammootty films"* → *"what about with Priyadarshan?"* →
 *"only in the 90s"*. Ambiguous names ("Mohan") get clarification buttons instead of a guess.
 
@@ -111,7 +133,7 @@ NEO4J_URI=bolt://localhost:7687 NEO4J_PASSWORD=filmgraph-local FILMGRAPH_LOCAL_G
 
 .venv/bin/filmgraph chat --backend neo4j          # terminal chat with traces
 .venv/bin/python scripts/evaluate.py --neo4j --llm # → evals/report.md
-.venv/bin/python -m unittest discover -s tests     # 27 tests
+.venv/bin/python -m unittest discover -s tests     # 32 tests
 ```
 
 All settings are in [`.env.example`](.env.example): Neo4j/AuraDB credentials, LLM provider (`ollama` | `openai`-compatible | `none`),

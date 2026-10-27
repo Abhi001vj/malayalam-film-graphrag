@@ -67,6 +67,35 @@ function cardView(card) {
   return c;
 }
 
+function feedbackView(question, data) {
+  const box = el('div', 'feedback');
+  const payload = extra => JSON.stringify({question, intent: data.intent, answer: data.answer.slice(0, 600),
+    entities: (data.entities || []).map(e => e.id), film_ids: (data.film_ids || data.cards?.map(c => c.id) || []).slice(0, 60), ...extra});
+  const send = async (extra, done) => {
+    try {
+      const r = await fetch('/api/feedback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: payload(extra)});
+      const d = await r.json(); if (!r.ok) throw Error(d.error || 'Could not send feedback');
+      done(d);
+    } catch (e) { status.textContent = e.message; }
+  };
+  const status = el('span', 'feedback-status');
+  const up = el('button', 'quiet', '👍'), down = el('button', 'quiet', '👎'), fix = el('button', 'quiet', 'Suggest a correction');
+  up.title = 'This answer is right'; down.title = 'This answer is wrong';
+  up.onclick = () => send({kind: 'rating', rating: 1}, () => { status.textContent = 'Thanks!'; up.disabled = down.disabled = true; });
+  down.onclick = () => send({kind: 'rating', rating: -1}, () => { status.textContent = 'Thanks. Tell us what is wrong:'; up.disabled = down.disabled = true; form.hidden = false; });
+  const form = el('form', 'correction'); form.hidden = true;
+  form.innerHTML = '<label>What is wrong?<textarea name="correction" rows="2" required minlength="5" maxlength="2000" placeholder="e.g. They acted together in 59 films; Harikrishnans and Twenty:20 are listed but ... is missing"></textarea></label>'
+    + '<label>Correct value (optional)<input name="claimed_value" maxlength="100" placeholder="e.g. 59"></label>'
+    + '<label>Proof link<input name="proof_url" type="url" maxlength="500" placeholder="https://en.wikipedia.org/wiki/..."></label>'
+    + '<button class="filter-apply">Send for review</button><small> A curator checks every correction against the proof before the graph changes.</small>';
+  form.onsubmit = e => { e.preventDefault(); const f = new FormData(form);
+    send({kind: 'correction', correction: f.get('correction'), claimed_value: f.get('claimed_value'), proof_url: f.get('proof_url')},
+      d => { form.hidden = true; status.textContent = `Correction #${d.id || ''} queued for review — thank you.`; }); };
+  fix.onclick = () => { form.hidden = !form.hidden; };
+  box.append(up, down, fix, status, form);
+  return box;
+}
+
 async function chat(question, overrides) {
   if (chatState.pending) return;
   chatState.pending = true; $('#send').disabled = true;
@@ -94,6 +123,7 @@ async function chat(question, overrides) {
     }
     if (data.sources?.length) { const s = el('details', 'sources'); s.append(el('summary', '', 'Sources (' + data.sources.length + ')')); for (const src of data.sources) { const p = el('p', '', `[${src.n}] ${src.film}: ${src.text.slice(0, 220)}… `); p.append(link('page', src.url)); s.append(p); } m.append(s); }
     if (data.suggestions?.length) { const sug = el('div', 'suggestions'); for (const q of data.suggestions) { const b = el('button', '', q + ' ↗'); b.onclick = () => chat(q); sug.append(b); } m.append(sug); }
+    m.append(feedbackView(question, data));
     m.append(traceView(data));
     $('#chat-log').append(m); $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
     if (data.graph?.nodes?.length) {

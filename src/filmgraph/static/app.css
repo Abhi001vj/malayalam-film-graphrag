@@ -11,3 +11,4 @@
 .chat-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:.4em}.chat-controls select{font:inherit}
 @media (prefers-color-scheme:dark){.trace pre.query{background:#1f241d}.chip{background:#2a3127}}
 .evidence{font-size:.75em;margin:.25em 0;padding:2px 6px;border-radius:6px}.evidence.ok{background:#e6f0e0;color:#3d5a32}.evidence.weak{background:#f6ead2;color:#7a5a1e}
+.feedback{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:.5em;font-size:.82em}.feedback button{padding:2px 8px}.feedback-status{color:#5d6b57}.correction{flex-basis:100%;display:grid;gap:6px;margin-top:.3em}.correction textarea,.correction input{width:100%;font:inherit}
