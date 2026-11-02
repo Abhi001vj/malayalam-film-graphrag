@@ -102,7 +102,8 @@ def consume_quota(handler,question,filters):
     if os.environ.get('VERCEL'):
         raise AccountError('Account service must be configured before public queries are enabled',503)
     day=datetime.now(timezone.utc).date().isoformat()
-    path=Path(os.environ.get('FILMGRAPH_ACCOUNTS_DB','data/accounts.sqlite3'));path.parent.mkdir(parents=True,exist_ok=True)
+    from . import settings
+    path=Path(settings.get('paths.accounts_db'));path.parent.mkdir(parents=True,exist_ok=True)
     with closing(sqlite3.connect(path,timeout=30)) as con:
         con.execute('CREATE TABLE IF NOT EXISTS usage(subject TEXT,day TEXT,fingerprint TEXT,PRIMARY KEY(subject,day,fingerprint))')
         con.execute('BEGIN IMMEDIATE')

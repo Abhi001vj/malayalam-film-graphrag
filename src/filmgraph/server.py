@@ -8,12 +8,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from .db import connect
 from .search import search, coverage, film_detail, person_graph
-from . import accounts
+from . import accounts, settings
 
 STATIC = Path(__file__).parent / 'static'
 
 
 def make_handler(db_path: str, use_vectors: bool = False):
+    settings._runtime['db'] = db_path  # the --db this server started with is the default data path
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,format,*args):
             # Search text and account details do not go into access logs.
@@ -47,7 +48,14 @@ def make_handler(db_path: str, use_vectors: bool = False):
                 if path.startswith('/api/auth/'):
                     data,headers=accounts.auth(path.rsplit('/',1)[-1],body,self)
                     return self.json_response(data,headers=headers)
-                with connect(db_path) as con:
+                if path=='/api/settings':
+                    # Paths and model hosts are machine configuration: only the local operator may change them.
+                    if not settings.writable() or self.client_address[0] not in ('127.0.0.1','::1'):
+                        return self.json_response({'error':'Settings can only be changed on a local server'},403)
+                    settings.save({} if body.get('reset') is True else body.get('values',{}))
+                    with connect(settings.get('paths.db')) as con:
+                        return self.json_response(settings.describe(con))
+                with connect(settings.get('paths.db')) as con:
                     if path=='/api/query':
                         question=body.get('question','')
                         if not isinstance(question,str) or not 1<=len(question)<=1000:raise ValueError('Enter a question of at most 1000 characters')
@@ -71,7 +79,7 @@ def make_handler(db_path: str, use_vectors: bool = False):
                         if not isinstance(question,str) or not 1<=len(question)<=500:raise ValueError('Enter a question of at most 500 characters')
                         context=body.get('context') if isinstance(body.get('context'),dict) else None
                         overrides=body.get('overrides') if isinstance(body.get('overrides'),dict) else None
-                        backend=body.get('backend') if body.get('backend') in {'auto','neo4j','sqlite'} else 'auto'
+                        backend=body.get('backend') if body.get('backend') in {'auto','neo4j','sqlite'} else None  # None -> settings
                         quota=self.quota(question+json.dumps(overrides or {}),{})
                         if quota is None:return
                         data=answer(con,question,context,overrides,body.get('use_llm') is not False,backend)
@@ -96,8 +104,11 @@ def make_handler(db_path: str, use_vectors: bool = False):
             parsed=urlparse(self.path);query=parse_qs(parsed.query)
             value=lambda key,default='':query.get(key,[default])[0]
             try:
+                if parsed.path=='/api/settings':
+                    with connect(settings.get('paths.db')) as con:
+                        return self.json_response(settings.describe(con))
                 if parsed.path.startswith('/api/'):
-                    with connect(db_path) as con:
+                    with connect(settings.get('paths.db')) as con:
                         if parsed.path in {'/api/search','/api/chat'}:
                             question=value('q')[:1000]
                             filters={k:value(k)[:100] for k in ('year','year_from','year_to','role','technology','location') if value(k)}

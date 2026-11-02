@@ -12,6 +12,7 @@ import sqlite3
 from collections import deque
 
 from .kg import REL_TYPES
+from . import settings
 
 CORE_ROLES = ['actor', 'director', 'writer', 'producer', 'cinematographer', 'music_director', 'editor', 'lyricist']
 SONG_RELS = {'singer': 'SANG', 'lyricist': 'WROTE_LYRICS', 'music_director': 'COMPOSED'}
@@ -19,6 +20,18 @@ FACT_LABELS = {'location': 'Place', 'technology': 'Technology', 'genre': 'Genre'
 TRIPLE_RELATIONS = {'REMAKE_OF', 'REMADE_AS', 'SEQUEL_TO', 'HAS_SEQUEL', 'BASED_ON', 'SHOT_AT', 'SET_IN',
                     'PRODUCED_BY', 'DISTRIBUTED_BY', 'WON_AWARD', 'NOMINATED_FOR', 'SCREENED_AT', 'INSPIRED_BY',
                     'DEBUTED_IN', 'MENTIONS'}
+
+
+def _path_roles():
+    return [r for r in settings.get('relations.path_roles') if r in REL_TYPES]
+
+
+def _relations(relation):
+    """Relations a triple query may return: the asked one if enabled, else every enabled one."""
+    enabled = settings.get('relations.enabled')
+    if relation in settings.RELATIONS:
+        return [relation] if relation in enabled else []
+    return [r for r in enabled if r != 'MENTIONS'] if relation is None else []
 
 
 def _roles(roles):
@@ -86,6 +99,11 @@ class SQLiteStore:
     def songs(self, people: list[dict], film_id=None, limit=100):
         where, params = [], []
         for p in people:
+            if p.get('film_roles'):  # "Mohanlal films": a credit on the film, not on the song
+                where.append('EXISTS(SELECT 1 FROM kg_credits k WHERE k.film_id=s.film_id AND k.person_id=? AND k.role IN (%s))'
+                             % ','.join('?' * len(p['film_roles'])))
+                params += [p['id'], *p['film_roles']]
+                continue
             roles = _roles(p.get('roles')) or ['singer', 'lyricist', 'music_director']
             sql = 'EXISTS(SELECT 1 FROM kg_song_credits c WHERE c.song_id=s.id AND c.person_id=? AND c.role IN (%s))' % ','.join('?' * len(roles))
             params += [p['id'], *roles]
@@ -100,14 +118,15 @@ class SQLiteStore:
         return [dict(r) for r in self.con.execute(sql, [*params, limit])], sql
 
     def shortest_path(self, a, b, max_hops=6):
-        """Bidirectional BFS over the person-film bipartite graph (core roles only)."""
-        sql = 'BFS over kg_credits(person_id, film_id) WHERE role IN core roles'
+        """Bidirectional BFS over the person-film bipartite graph (roles chosen in settings)."""
+        roles = _path_roles()
+        sql = f"BFS over kg_credits(person_id, film_id) WHERE role IN ({', '.join(roles)})"
         if a == b:
             return [a], sql
         def neighbours(node):
             col, other = ('person_id', 'film_id') if not self._is_film(node) else ('film_id', 'person_id')
             return [r[0] for r in self.con.execute(
-                f'SELECT {other} FROM kg_credits WHERE {col}=? AND role IN (%s)' % ','.join('?' * len(CORE_ROLES)), [node, *CORE_ROLES])]
+                f'SELECT {other} FROM kg_credits WHERE {col}=? AND role IN (%s)' % ','.join('?' * len(roles)), [node, *roles])]
         parents = {a: None}; parents_b = {b: None}
         qa, qb = deque([a]), deque([b])
         for _ in range(max_hops * 2):
@@ -135,9 +154,10 @@ class SQLiteStore:
         return self.con.execute('SELECT 1 FROM kg_films WHERE id=?', (node,)).fetchone() is not None
 
     def related(self, relation=None, film_id=None, object_id=None, limit=100):
-        where, params = ['t.relation!=?'], ['MENTIONS']
-        if relation in TRIPLE_RELATIONS:
-            where = ['t.relation=?']; params = [relation]
+        relations = _relations(relation)
+        if not relations:
+            return [], '-- relation disabled in settings'
+        where, params = ['t.relation IN (%s)' % ','.join('?' * len(relations))], list(relations)
         if film_id:
             where.append('t.film_id=?'); params.append(film_id)
         if object_id:
@@ -154,7 +174,7 @@ class Neo4jStore:
 
     def __init__(self, driver, database=None):
         self.driver = driver
-        self.database = database or os.getenv('NEO4J_DATABASE', 'neo4j')
+        self.database = database or settings.get('models.neo4j_database')
 
     def run(self, cypher, **params):
         records, _, _ = self.driver.execute_query(cypher, params, database_=self.database, routing_='r')
@@ -211,6 +231,10 @@ ORDER BY role, p.film_count DESC"""
         lines, params = ['MATCH (s:Song)-[:IN_FILM]->(f:Film)'], {'limit': limit}
         conds = []
         for i, p in enumerate(people):
+            params[f'p{i}'] = p['id']
+            if p.get('film_roles'):  # "Mohanlal films": a credit on the film, not on the song
+                conds.append(f'EXISTS {{ MATCH (:Person {{id: $p{i}}})-[{self._rel(p["film_roles"])}]->(f) }}')
+                continue
             roles = [r for r in (p.get('roles') or song_types) if r in song_types]
             rels = '|'.join(song_types[r] for r in roles)
             cond = f'EXISTS {{ MATCH (:Person {{id: $p{i}}})-[:{rels}]->(s) }}'
@@ -226,7 +250,7 @@ ORDER BY role, p.film_count DESC"""
         return self.run(cypher, **params), cypher
 
     def shortest_path(self, a, b, max_hops=6):
-        rels = '|'.join(REL_TYPES[r] for r in CORE_ROLES)
+        rels = '|'.join(REL_TYPES[r] for r in _path_roles())
         cypher = f"""MATCH (a:Person {{id: $a}}), (b:Person {{id: $b}})
 MATCH p = shortestPath((a)-[:{rels}*..{max_hops * 2}]-(b))
 RETURN [n IN nodes(p) | n.id] AS path"""
@@ -234,8 +258,11 @@ RETURN [n IN nodes(p) | n.id] AS path"""
         return (rows[0]['path'] if rows else []), cypher
 
     def related(self, relation=None, film_id=None, object_id=None, limit=100):
-        rel = f':{relation}' if relation in TRIPLE_RELATIONS else ''
-        conds = ['type(r) <> "MENTIONS"'] if not rel else []
+        relations = _relations(relation)
+        if not relations:
+            return [], '// relation disabled in settings'
+        rel = ':' + '|'.join(relations)  # whitelisted names only
+        conds = []
         if film_id:
             conds.append('r.film_id = $film')
         if object_id:
@@ -251,8 +278,8 @@ ORDER BY confidence DESC, coalesce(year, 0) DESC LIMIT $limit"""
 
 def open_store(con: sqlite3.Connection, prefer: str | None = None):
     """Neo4j when configured and reachable, otherwise the SQLite mirror."""
-    prefer = prefer or os.getenv('FILMGRAPH_GRAPH', 'auto')
-    if prefer in ('auto', 'neo4j') and os.getenv('NEO4J_URI'):
+    prefer = prefer or settings.get('models.graph_backend')
+    if prefer in ('auto', 'neo4j') and settings.get('models.neo4j_uri'):
         try:
             store = Neo4jStore(_driver())
             if _LOADED.get('ok') is None:  # an empty/unloaded Neo4j must never answer
@@ -268,14 +295,22 @@ def open_store(con: sqlite3.Connection, prefer: str | None = None):
     return SQLiteStore(con)
 
 
-_DRIVER = None
+_DRIVER: dict = {}
 _LOADED: dict = {}
 
 
 def _driver():
-    global _DRIVER
-    if _DRIVER is None:
+    key = (settings.get('models.neo4j_uri'), settings.get('models.neo4j_username'))
+    if _DRIVER.get('key') != key:
         from neo4j import GraphDatabase
-        _DRIVER = GraphDatabase.driver(os.environ['NEO4J_URI'], auth=(os.getenv('NEO4J_USERNAME', 'neo4j'),
-                                                                      os.getenv('NEO4J_PASSWORD', '')))
-    return _DRIVER
+        reset_driver()
+        _DRIVER.update(key=key, driver=GraphDatabase.driver(key[0], auth=(key[1], os.getenv('NEO4J_PASSWORD', ''))))
+    return _DRIVER['driver']
+
+
+def reset_driver() -> None:
+    """Called when settings change: reconnect and re-check that the graph is loaded."""
+    old = _DRIVER.pop('driver', None)
+    _DRIVER.clear(); _LOADED.clear()
+    if old is not None:
+        old.close()

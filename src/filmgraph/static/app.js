@@ -46,6 +46,8 @@ function drawGraph(){
  let edges=graph.edges.filter(e=>visible.has(e.from)&&visible.has(e.to));const connected=new Set(edges.flatMap(e=>[e.from,e.to]));nodes=nodes.filter(n=>connected.has(n.id)||n.group==='film');
  $('#graph-empty').classList.toggle('hidden',nodes.length>0);$('#graph-status').textContent=fmt(nodes.length)+' nodes · '+fmt(edges.length)+' connections';$('#graph-hint').textContent=graph.note+' · Double-click to explore.';
  if(state.network)state.network.destroy();if(!window.vis){$('#graph-status').textContent='Graph library unavailable';return}
+ const fixed=graph.layout==='fixed';showCaption(fixed?graph:null);
+ if(fixed){drawExplanation(graph,nodes,edges);return}
  const dataset=new vis.DataSet(nodes.map(n=>({...n,title:n.label+(n.year?' ('+n.year+')':'')+' · '+roleLabel(n.group),
   color:{background:colors[n.group]||'#9ba99a',border:colors[n.group]||'#9ba99a',highlight:{background:'#d1ad66',border:'#496f3e'}},
   shape:n.group==='film'?'dot':n.group==='focus'?'diamond':'dot',size:n.group==='focus'?24:n.group==='film'?11:7,
@@ -62,6 +64,22 @@ function drawGraph(){
    state.network.cluster({joinCondition:n=>members.some(m=>m.id===n.id),clusterNodeProperties:{id:'cluster:'+group,label:roleLabel(group)+(cluster==='decade'?'s':'')+' · '+members.length,color:colors[group]||'#84976f',shape:'dot',size:26,font:{color:'#466139',size:13}}});
   }
  }
+}
+// Explanation layout for "X and Y together": people fixed on both sides, films between them, one styled edge per credit.
+const BUCKET_STYLE={costar:{background:'#355b43',border:'#355b43',font:'#ffffff'},cameo:{background:'#fdf3df',border:'#c79a45',font:'#6d4f17'},offscreen:{background:'#f4f1e8',border:'#b9ae93',font:'#6f6a58'},unconfirmed:{background:'#f3f4ef',border:'#b7bdb0',font:'#7c8378'}};
+const EDGE_STYLE={role:{color:'#4c7a52',width:1.6,dashes:false},cameo:{color:'#c79a45',width:1.3,dashes:[7,5]},self:{color:'#c79a45',width:1.3,dashes:[7,5]},voice:{color:'#a99c79',width:1.2,dashes:[7,5]},archive:{color:'#a99c79',width:1.2,dashes:[7,5]},unconfirmed:{color:'#b7bdb0',width:1,dashes:[2,5]}};
+function showCaption(graph){const box=$('#graph-caption');if(!box)return;box.classList.toggle('hidden',!graph);$('.graph-legend')?.classList.toggle('hidden',!!graph);if(!graph)return;box.replaceChildren(el('p','',graph.caption));
+ if(graph.counts){const row=el('div','caption-legend');for(const [b,label] of [['costar','Full roles (counted)'],['cameo','Cameo / as self (counted)'],['offscreen','Voice or archive only (not counted)'],['unconfirmed','Unconfirmed (not counted)']]){if(!graph.counts[b])continue;const s=el('span','caption-key '+b);s.append(el('i'),label+' · '+graph.counts[b]);row.append(s)}box.append(row)}}
+function drawExplanation(graph,nodes,edges){
+ const dataset=new vis.DataSet(nodes.map(n=>{if(n.group==='focus')return{...n,title:n.label+' · queried person',shape:'box',margin:{top:12,bottom:12,left:16,right:16},color:{background:'#d1ad66',border:'#9c7a35',highlight:{background:'#d1ad66',border:'#496f3e'}},font:{face:'system-ui',size:17,color:'#2f3a1f',bold:true},borderWidth:2,shapeProperties:{borderRadius:10}};
+  const b=BUCKET_STYLE[n.bucket]||BUCKET_STYLE.costar;return{...n,title:n.label,shape:'box',margin:{top:6,bottom:6,left:9,right:9},color:{background:b.background,border:b.border,highlight:{background:b.background,border:'#2a8e68'}},font:{face:'system-ui',size:13,color:b.font},borderWidth:1,shapeProperties:{borderRadius:6,borderDashes:n.bucket==='unconfirmed'?[3,3]:false}}}));
+ const lines=new vis.DataSet(edges.map(e=>{const st=EDGE_STYLE[e.kind]||EDGE_STYLE.role;return{...e,label:undefined,color:{color:st.color,opacity:.55,highlight:st.color,hover:st.color},width:st.width,dashes:st.dashes,hoverWidth:1.5,selectionWidth:2,smooth:false}}));
+ state.network=new vis.Network($('#graph'),{nodes:dataset,edges:lines},{physics:false,interaction:{hover:true,tooltipDelay:120,dragNodes:false},layout:{improvedLayout:false},edges:{smooth:false}});
+ const fit=()=>{state.network.fit({animation:false});state.network.moveTo({scale:state.network.getScale()*.94})};
+ state.network.once('afterDrawing',()=>requestAnimationFrame(fit)); // boxes are measured on the first draw; fit to them, with a margin
+ state.network.on('hoverNode',p=>{const n=graph.nodes.find(n=>n.id===p.node);if(!n)return;const why=edges.filter(e=>e.to===n.id||e.from===n.id).map(e=>e.title).slice(0,3).join('  ·  ');$('#graph-status').textContent=n.group==='focus'?n.label+' · '+edges.filter(e=>e.from===n.id&&(e.kind==='role')).length+' real roles in this answer':why});
+ state.network.on('selectNode',p=>{const n=graph.nodes.find(n=>n.id===p.nodes[0]);if(n?.group==='film')selectFilm(n.id,false)});
+ state.network.on('doubleClick',p=>{const n=graph.nodes.find(n=>n.id===p.nodes[0]);if(!n)return;n.group==='film'?openFilmById(n.id):runQuery(n.label)});
 }
 function selectFilm(id,select=true){document.querySelectorAll('.film-card').forEach(c=>c.classList.toggle('selected',c.dataset.id===id));if(select&&state.network?.body.data.nodes.get(id)){state.network.selectNodes([id]);state.network.focus(id,{scale:1.05,animation:{duration:450}})}}
 async function openFilmById(id){if(state.films.has(id))return openFilm(state.films.get(id));try{const r=await fetch('/api/film?id='+encodeURIComponent(id));if(!r.ok)throw Error('Film unavailable');openFilm(await r.json())}catch(e){addMessage(e.message)}}
@@ -101,4 +119,5 @@ $('#graph-tab').addEventListener('click',()=>{$('.explorer').classList.remove('s
 $('#list-tab').addEventListener('click',()=>{$('.explorer').classList.add('show-list');$('#list-tab').classList.add('active');$('#graph-tab').classList.remove('active')});
 $('#close-film').addEventListener('click',()=>$('#film-dialog').close());$('#close-coverage').addEventListener('click',()=>$('#coverage-dialog').close());$('#coverage-button').addEventListener('click',showCoverage);
 for(const d of document.querySelectorAll('dialog'))d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)d.close()}});
-loadStats();runQuery(new URLSearchParams(location.search).get('q')||state.query,{chat:false});setInterval(loadStats,60000);
+// Deferred scripts all run before DOMContentLoaded, so by then chat.js has routed runQuery through the GraphRAG pipeline.
+loadStats();document.addEventListener('DOMContentLoaded',()=>runQuery(new URLSearchParams(location.search).get('q')||state.query));setInterval(loadStats,60000);

@@ -20,6 +20,12 @@ from urllib.parse import urlparse
 from . import accounts
 
 PATH = Path(os.environ.get('FILMGRAPH_FEEDBACK_DB', 'data/feedback.sqlite3'))
+
+
+def _db() -> Path:
+    """The review-queue database: the settings page value when one is saved, else PATH."""
+    from . import settings
+    return Path(settings.saved().get('paths', {}).get('feedback_db') or PATH)
 KINDS = {'rating', 'correction'}
 # Proof must point at something a curator can check; social posts are fine, but no local or raw IP URLs.
 ALLOWED_PROOF = re.compile(r'^https://[a-z0-9.-]+\.[a-z]{2,}(/|$)', re.I)
@@ -71,8 +77,8 @@ def submit(handler, body: dict) -> dict:
         return accounts.gateway({'action': 'feedback', 'access_token': accounts.access_token(handler) or None,
                                  'guest_key': guest, 'item': item})
     reporter = 'guest:' + hashlib.sha256(('feedback:' + ip).encode()).hexdigest()[:16]  # pseudonymous, no raw IP
-    PATH.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(PATH, timeout=30)) as con:
+    _db().parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(_db(), timeout=30)) as con:
         con.execute(SCHEMA)
         recent = con.execute("SELECT count(*) FROM feedback WHERE reporter=? AND created_at > datetime('now','-1 hour')", (reporter,)).fetchone()[0]
         if recent >= 30:
@@ -87,9 +93,9 @@ def submit(handler, body: dict) -> dict:
 
 
 def review(status: str = 'pending', limit: int = 50) -> list[dict]:
-    if not PATH.exists():
+    if not _db().exists():
         return []
-    with closing(sqlite3.connect(PATH)) as con:
+    with closing(sqlite3.connect(_db())) as con:
         con.row_factory = sqlite3.Row
         con.execute(SCHEMA)
         return [dict(r) for r in con.execute('SELECT * FROM feedback WHERE kind=? AND status=? ORDER BY id DESC LIMIT ?',
@@ -99,15 +105,15 @@ def review(status: str = 'pending', limit: int = 50) -> list[dict]:
 def decide(item_id: int, status: str, note: str = '') -> None:
     if status not in ('accepted', 'rejected'):
         raise ValueError('status must be accepted or rejected')
-    with closing(sqlite3.connect(PATH)) as con:
+    with closing(sqlite3.connect(_db())) as con:
         con.execute('UPDATE feedback SET status=?, reviewer_note=? WHERE id=?', (status, note, item_id))
         con.commit()
 
 
 def summary() -> dict:
-    if not PATH.exists():
+    if not _db().exists():
         return {'ratings': {}, 'corrections': {}}
-    with closing(sqlite3.connect(PATH)) as con:
+    with closing(sqlite3.connect(_db())) as con:
         con.execute(SCHEMA)
         ratings = dict(con.execute("SELECT intent || ':' || rating, count(*) FROM feedback WHERE kind='rating' GROUP BY 1"))
         corrections = dict(con.execute("SELECT status, count(*) FROM feedback WHERE kind='correction' GROUP BY 1"))

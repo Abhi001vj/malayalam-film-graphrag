@@ -18,7 +18,7 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
-from . import llm, nlu, retrieval
+from . import appearance, llm, nlu, retrieval, settings
 from .graphstore import SQLiteStore, open_store
 
 FOLLOW_UP = re.compile(r"^(?:and|also|what about|how about|only|just|with|in the|but|same|now|then)\b|\b(?:he|she|they|them|his|her|their|those|these|together)\b", re.I)
@@ -147,20 +147,41 @@ def _years(slots):
 
 
 def evidence(con, film_id, people) -> dict:
-    """How each queried person's credit on a film is sourced. 'confirmed' = on the film's Wikipedia page."""
+    """How each queried person's credit on a film is sourced, limited to the sources enabled in settings.
+    'confirmed' = every person has a credit from a confirming source (default: the film's Wikipedia page)."""
+    enabled, confirming = set(settings.get('sources.enabled')), set(settings.get('sources.confirming'))
     per = {}
     for p in people:
         roles = p.get('roles') or []
         sql = 'SELECT role, sources FROM kg_credits WHERE film_id=? AND person_id=?' + (' AND role IN (%s)' % ','.join('?' * len(roles)) if roles else '')
         rows = con.execute(sql, [film_id, p['id'], *roles]).fetchall()
-        kinds = set(','.join(r[1] for r in rows).split(',')) - {''}
+        kinds = set(','.join(r[1] for r in rows).split(',')) & enabled
         song_sql = 'SELECT DISTINCT c.role FROM kg_song_credits c JOIN kg_songs s ON s.id=c.song_id WHERE s.film_id=? AND c.person_id=?'
         song_roles = {r[0] for r in con.execute(song_sql + (' AND c.role IN (%s)' % ','.join('?' * len(roles)) if roles else ''), [film_id, p['id'], *roles])}
-        if song_roles:
+        if song_roles and 'wikipedia' in enabled:
             kinds.add('wikipedia')  # soundtrack tables come from the film's own page
-        per[p['name']] = {'roles': sorted({r[0] for r in rows} | song_roles), 'sources': sorted(kinds)}
-    confirmed = all('wikipedia' in v['sources'] for v in per.values())
-    return {'confirmed': confirmed, 'people': per}
+        per[p['name']] = {'roles': sorted({r[0] for r in rows} | song_roles), 'sources': sorted(kinds), 'id': p['id']}
+        if 'actor' in roles:
+            hit = appearance.lookup(con, film_id, p['id'])
+            if hit:
+                per[p['name']]['appearance'] = {'kind': hit[0], 'label': appearance.LABELS[hit[0]], 'evidence': hit[1], 'source_url': hit[2]}
+    confirmed = all(confirming & set(v['sources']) for v in per.values())
+    return {'confirmed': confirmed, 'people': per, 'supported': all(v['sources'] for v in per.values())}
+
+
+def _source_label(names) -> str:
+    return '/'.join({'wikipedia': 'Wikipedia', 'wikidata': 'Wikidata', 'imdb': 'IMDb'}[n] for n in names)
+
+
+def source_filter(con, rows, people, trace) -> list:
+    """Drop films whose credits rest only on sources switched off in settings."""
+    enabled = settings.get('sources.enabled')
+    if set(enabled) == set(settings.SOURCES):
+        return rows
+    t = time.perf_counter()
+    kept = [r for r in rows if evidence(con, r['id'], people)['supported']]
+    trace.add('source_filter', t, enabled=enabled, dropped=len(rows) - len(kept))
+    return kept
 
 
 def default_roles(con, people, trace) -> None:
@@ -205,8 +226,41 @@ def relationship_breakdown(rows, people) -> list[tuple[str, int]]:
     return combos.most_common(6)
 
 
+# 'costar' and 'cameo' both count as acting together (both are on screen); the cameo is named, never hidden.
+BUCKETS = [('costar', 'Both in full roles'), ('cameo', 'Together on screen · cameo or as self'),
+           ('offscreen', 'Voice, narration or archive footage only'), ('unconfirmed', 'Only Wikidata/IMDb claim this')]
+
+
+def acting_bucket(ev) -> str:
+    """'acted together' = every named actor plays a real on-screen role, confirmed by a trusted source."""
+    if not ev['confirmed']:
+        return 'unconfirmed'
+    kinds = {v.get('appearance', {}).get('kind', 'role') for v in ev['people'].values()}
+    if kinds <= {'role'}:
+        return 'costar'
+    return 'offscreen' if kinds & {'voice', 'archive'} else 'cameo'
+
+
+def _why(r) -> str:
+    """'Mammootty: voice / narration' for the people whose appearance is not a full role."""
+    if r.get('bucket') == 'unconfirmed':
+        confirming = set(settings.get('sources.confirming'))
+        names = {'wikipedia': 'Wikipedia', 'wikidata': 'Wikidata', 'imdb': 'IMDb'}
+        return '; '.join(f"{name} only on {'/'.join(names[x] for x in v['sources']) or 'no enabled source'}"
+                         for name, v in r['evidence']['people'].items() if not confirming & set(v['sources']))
+    return '; '.join(f"{name} {v['appearance']['label']}" for name, v in r['evidence']['people'].items()
+                     if v.get('appearance', {}).get('kind', 'role') != 'role')
+
+
+def _quote(r) -> str:
+    """The source wording behind a cameo, e.g. 'Adv. Nandagopal Marar (cameo appearance)'."""
+    return next((v['appearance']['evidence'][:90] for v in r['evidence']['people'].values()
+                 if v.get('appearance', {}).get('kind') in ('cameo', 'self') and v['appearance'].get('evidence')), '')
+
+
 def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
     people = _people(entities)
+    defaulted = not any(p['roles'] for p in people)
     default_roles(con, people, trace)
     facts, film_sets, labels = _fact_filters(con, store, entities, trace)
     t = time.perf_counter()
@@ -214,29 +268,84 @@ def flow_collaboration(con, store, q, entities, slots, use_llm, trace):
     for allowed in film_sets:
         rows = [r for r in rows if r['id'] in allowed]
     trace.add('graph_query', t, backend=store.name, template='films_with', query=query, params=[p['id'] for p in people], rows=len(rows))
+    rows = source_filter(con, rows, people, trace)
     for r in rows:
         r['evidence'] = evidence(con, r['id'], people)
     rows.sort(key=lambda r: (not r['evidence']['confirmed'],))  # confirmed first, keeps year order within groups
     confirmed = [r for r in rows if r['evidence']['confirmed']]
     weak = [r for r in rows if not r['evidence']['confirmed']]
     names = ' and '.join(_who(p) for p in people) + (f" ({', '.join(labels)})" if labels else '')
+    confirming = settings.get('sources.confirming')
     if not rows:
         text = f'I found **no films** in the catalogue crediting {names}{_years(slots)}.'
+        if defaulted and any(p['roles'] for p in people):
+            # They never acted together; say whether they share a film in any other role (Mammootty acts, Dulquer produces).
+            t = time.perf_counter()
+            other, oq = store.films_with([{**p, 'roles': []} for p in people], slots.get('year_from'), slots.get('year_to'), facts or None)
+            trace.add('graph_query', t, backend=store.name, template='films_with', mode='any_role_fallback', query=oq, rows=len(other))
+            if other:
+                rows_any = [{**r, 'evidence': evidence(con, r['id'], [{**p, 'roles': []} for p in people])} for r in other]
+                breakdown = relationship_breakdown(rows_any, [{**p, 'roles': []} for p in people])
+                text = (f"{' and '.join(p['name'] for p in people)} have **never acted together** in a film in the catalogue. "
+                        f"They share **{len(other)} film{'s' if len(other) != 1 else ''}** in other roles: "
+                        + ', '.join(f"{r['title']} ({r['year'] or '?'})" for r in other[:8]) + '.'
+                        + (('\n' + '\n'.join(f'- {combo}: **{n}**' for combo, n in breakdown)) if breakdown else ''))
+                out = _films_response(con, text, rows_any, [p['id'] for p in people], trace)
+                out['graph'] = collaboration_graph(con, rows_any, people)
+                return out
     else:
         text = (f'**{len(confirmed)} film{"s" if len(confirmed) != 1 else ""}** credit {names}{_years(slots)}{_span(confirmed or rows, slots)}, '
-                f'each confirmed by the film\'s Wikipedia page. '
+                + ("each confirmed by the film's Wikipedia page. " if confirming == ['wikipedia'] else f'each confirmed by {_source_label(confirming)}. ')
                 + (f'Most recent: {", ".join(r["title"] + " (" + str(r["year"]) + ")" for r in confirmed[:3])}.' if confirmed else ''))
         if weak:
-            text += (f'\n\n⚠ **{len(weak)} more** rest only on Wikidata/IMDb claims and may be cameos, voice-overs or data errors: '
+            text += (f'\n\n⚠ **{len(weak)} more** rest only on {_source_label(s for s in settings.SOURCES if s not in confirming) or "unconfirmed"} claims and may be cameos, voice-overs or data errors: '
                      + ', '.join(f"{r['title']} ({r['year'] or '?'})" for r in weak[:6]) + ('…' if len(weak) > 6 else '') + '.')
+    acting = len(people) > 1 and all(p.get('roles') == ['actor'] for p in people) and rows and \
+        any('appearance' in v for r in rows for v in r['evidence']['people'].values())
+    if acting:
+        t = time.perf_counter()
+        for r in rows:
+            r['bucket'] = acting_bucket(r['evidence'])
+        groups = {b: [r for r in rows if r['bucket'] == b] for b, _ in BUCKETS}
+        rows = [r for b, _ in BUCKETS for r in groups[b]]
+        confirmed = groups['costar'] + groups['cameo']
+        trace.add('appearance_check', t, rule='acted together = every named actor appears on screen (full role, cameo or as themselves), '
+                  'confirmed by a trusted source; voice/narration and archive footage are not counted',
+                  **{b: len(groups[b]) for b, _ in BUCKETS})
+        names = ' and '.join(p['name'] for p in people) + (f" ({', '.join(labels)})" if labels else '')
+        recent = sorted(confirmed, key=lambda r: -(r['year'] or 0))[:3]
+        text = (f"**{len(confirmed)} film{'s' if len(confirmed) != 1 else ''}** where {names} act together on screen{_years(slots)}{_span(confirmed, slots) if confirmed else ''}: "
+                f"**{len(groups['costar'])}** with both in full roles"
+                + (f", and **{len(groups['cameo'])}** where one appears in a cameo or as self" if groups['cameo'] else '') + '. '
+                + (f'Most recent: {", ".join(r["title"] + " (" + str(r["year"]) + ")" for r in recent)}.' if recent else ''))
+        if groups['cameo']:
+            text += '\n\n**Counted, with a cameo:**\n' + '\n'.join(
+                f"- {r['title']} ({r['year'] or '?'}): {_why(r)}" + (f" — “{_quote(r)}”" if _quote(r) else '') for r in groups['cameo'][:10])
+        others = [(b, label) for b, label in BUCKETS[2:] if groups[b]]
+        if others:
+            text += '\n\n**Not counted as acting together:**'
+            for b, label in others:
+                shown = groups[b][:8]
+                text += (f"\n- {'⚠ ' if b == 'unconfirmed' else ''}{label} (**{len(groups[b])}**): "
+                         + ', '.join(f"{r['title']} ({r['year'] or '?'}; {_why(r)})" for r in shown) + ('…' if len(groups[b]) > 8 else ''))
     breakdown = relationship_breakdown(rows, people)
-    if len(people) > 1 and breakdown:
+    if len(people) > 1 and breakdown and not acting:
         text += f'\n\n**How they worked together** (all {len(rows)} films):\n' + '\n'.join(f'- {combo}: **{n}** film{"s" if n != 1 else ""}' for combo, n in breakdown)
     trace.add('provenance', t, confirmed=len(confirmed), weak=len(weak), breakdown=breakdown)
-    out = _films_response(con, text, rows, [p['id'] for p in people], trace)
-    by_id = {r['id']: r['evidence'] for r in rows}
+    # An acting answer lists every film with its bucket, so the not-counted ones show their reason too.
+    if acting:
+        rows = [r for r in rows if r['bucket'] == 'costar'][:60] + [r for r in rows if r['bucket'] != 'costar']
+    out = _films_response(con, text, rows, [p['id'] for p in people], trace, card_limit=len(rows) if acting else 12)
+    by_id = {r['id']: r for r in rows}
     for card in out['cards']:
-        card['evidence'] = by_id.get(card['id'])
+        card['evidence'] = by_id[card['id']]['evidence'] if card['id'] in by_id else None
+        if card['id'] in by_id and by_id[card['id']].get('bucket'):
+            card['bucket'] = by_id[card['id']]['bucket']
+            card['bucket_label'] = dict(BUCKETS)[card['bucket']]
+    if len(people) > 1:
+        out['graph'] = collaboration_graph(con, rows, people, acting)
+    if acting:
+        out['total'] = len(confirmed)
     out['confirmed_total'] = len(confirmed)
     return out
 
@@ -249,6 +358,7 @@ def flow_filmography(con, store, q, entities, slots, use_llm, trace):
     for allowed in film_sets:
         rows = [r for r in rows if r['id'] in allowed]
     trace.add('graph_query', t, backend=store.name, template='films_with', query=query, params=[people[0]['id']], rows=len(rows))
+    rows = source_filter(con, rows, people, trace)
     roles = Counter(r[0] for r in con.execute('SELECT role FROM kg_credits WHERE person_id=?', (people[0]['id'],)))
     role_text = ', '.join(f'{ROLE_LABEL(r)} ×{n}' for r, n in roles.most_common(4))
     text = (f"**{_who(people[0])}** has **{len(rows)} film{'s' if len(rows) != 1 else ''}**{' linked to ' + ', '.join(labels) if labels else ''}{_years(slots)}{_span(rows, slots)} in the catalogue"
@@ -321,13 +431,23 @@ def flow_film_crew(con, store, q, entities, slots, use_llm, trace):
 
 def flow_songs(con, store, q, entities, slots, use_llm, trace):
     people = _people(entities)
+    song_roles = ('singer', 'lyricist', 'music_director')
     for p in people:
-        p['roles'] = [r for r in p['roles'] if r in ('singer', 'lyricist', 'music_director')]
+        stated = p['roles']
+        p['roles'] = [r for r in stated if r in song_roles]
+        primary = (con.execute('SELECT primary_role FROM kg_people WHERE id=?', (p['id'],)).fetchone() or [None])[0]
+        # "Mohanlal films with songs by M. G. Sreekumar": Mohanlal is named for the film he is in, not for a song credit
+        if not p['roles'] and (stated or primary not in song_roles):
+            p['film_roles'] = [r for r in stated if r not in song_roles] or ['actor']
     film = next((e for e in entities if e['type'] == 'FILM'), None)
     t = time.perf_counter()
-    rows, query = store.songs(people, film['id'] if film else None, 200)
-    trace.add('graph_query', t, backend=store.name, template='songs', query=query, params=[p['id'] for p in people], rows=len(rows))
-    scope = ' and '.join(_who(p) for p in people) + (f" in {film['name']}" if film else '')
+    rows, query = store.songs(people, film['id'] if film else None, 5000)
+    trace.add('graph_query', t, backend=store.name, template='songs', query=query, params=[p['id'] for p in people], rows=len(rows),
+              film_people={p['name']: p['film_roles'] for p in people if p.get('film_roles')})
+    singers = [p for p in people if not p.get('film_roles')]
+    films_of = [p for p in people if p.get('film_roles')]
+    scope = (' and '.join(_who(p) for p in singers) or 'the catalogue') + (f" in {film['name']}" if film else '') \
+        + (' in films with ' + ' and '.join(f"{p['name']} ({'/'.join(p['film_roles'])})" for p in films_of) if films_of else '')
     text = f"**{len(rows)} song{'s' if len(rows) != 1 else ''}** credit {scope}{_span(rows)}."
     if rows:
         text += '\n' + '\n'.join(f"- {r['title']} — *{r['film']}* ({r['year'] or '?'})" for r in rows[:10])
@@ -573,10 +693,11 @@ def handover(con, question, reason, context) -> dict:
     ticket = {'at': time.strftime('%Y-%m-%dT%H:%M:%S'), 'question': question, 'reason': reason, 'context': context}
     delivered = 'not delivered (no handover channel configured)'
     try:  # serverless filesystems are read-only; Slack is the hosted channel
-        Path('data').mkdir(exist_ok=True)
-        with open('data/handover.jsonl', 'a') as fh:
+        path = Path(settings.get('paths.handover_log'))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'a') as fh:
             fh.write(json.dumps(ticket, ensure_ascii=False) + '\n')
-        delivered = 'queued locally (data/handover.jsonl)'
+        delivered = f'queued locally ({path})'
     except OSError:
         pass
     if os.getenv('SLACK_WEBHOOK_URL'):
@@ -600,9 +721,9 @@ FLOWS = {'collaboration': flow_collaboration, 'filmography': flow_filmography, '
 
 # ---------------------------------------------------------------- cards and graphs
 
-def _films_response(con, text, rows, focus, trace):
+def _films_response(con, text, rows, focus, trace, card_limit=12):
     t = time.perf_counter()
-    cards = [film_card(con, r['id'], focus) for r in rows[:12]]
+    cards = [film_card(con, r['id'], focus) for r in rows[:card_limit]]
     graph = film_graph(con, [r['id'] for r in rows[:60]], focus)
     trace.add('hydrate', t, cards=len(cards), nodes=len(graph['nodes']))
     return {'answer': text, 'cards': cards, 'graph': graph, 'total': len(rows),
@@ -684,6 +805,42 @@ def film_graph(con, film_ids, focus) -> dict:
     return {'nodes': list(nodes.values()), 'edges': edges, 'highlight': list(focus) + list(film_ids[:12])}
 
 
+def collaboration_graph(con, rows, people, acting=False, limit=80) -> dict:
+    """Explanation graph: the named people on either side, the films that connect them in the middle,
+    and one labelled edge per person and film saying how they appear. Nothing else is drawn."""
+    rows = rows[:limit]
+    cols = max(1, -(-len(rows) // 16))
+    per_col = -(-len(rows) // cols) if rows else 1
+    gap_x, gap_y = 215, 40
+    half = (cols - 1) * gap_x / 2
+    nodes, edges = [], []
+    side = [-(half + 260), half + 260] + [0] * max(0, len(people) - 2)
+    for i, p in enumerate(people):
+        node = _person_node(con, p['id'], focus=True)
+        node.update(x=side[i] if i < 2 else 0, y=0 if i < 2 else -(per_col * gap_y / 2 + 120), fixed=True)
+        nodes.append(node)
+    for n, r in enumerate(rows):
+        col, row = divmod(n, per_col)
+        bucket = r.get('bucket') or ('costar' if r['evidence']['confirmed'] else 'unconfirmed')
+        nodes.append({'id': r['id'], 'label': f"{r['title']} ({r['year'] or '?'})", 'year': r['year'], 'group': 'film', 'bucket': bucket,
+                      'x': col * gap_x - half, 'y': (row - (per_col - 1) / 2) * gap_y, 'fixed': True})
+        for name, v in r['evidence']['people'].items():
+            kind = v.get('appearance', {}).get('kind', 'role') if acting else 'role'
+            if not v['sources']:
+                kind = 'unconfirmed'
+            label = appearance.LABELS.get(kind, kind) if acting else '/'.join(ROLE_LABEL(x) for x in v['roles']) or 'credited'
+            edges.append({'from': v['id'], 'to': r['id'], 'label': label, 'kind': kind,
+                          'title': f"{name} → {r['title']}: {label}" + (f" · “{v['appearance']['evidence']}”" if v.get('appearance', {}).get('evidence') else '')
+                                   + f" · sources: {', '.join(v['sources']) or 'none enabled'}"})
+    names = ' and '.join(p['name'] for p in people)
+    caption = (f"{names} sit on either side, with every film in the middle linked to both. Counted films have a dark box "
+               "(both in full roles) or an amber box (one has a cameo or appears as self; the amber dashed line shows whose). "
+               "Light boxes are not counted: grey dashes mean voice or archive footage only, dots an unconfirmed Wikidata/IMDb claim."
+               if acting else f"{names} sit on either side. Each film in the middle is linked to both, and each line is labelled with that person's credit.")
+    return {'nodes': nodes, 'edges': edges, 'layout': 'fixed', 'caption': caption, 'highlight': [p['id'] for p in people],
+            'counts': {b: sum(1 for r in rows if r.get('bucket') == b) for b, _ in BUCKETS} if acting else None}
+
+
 def triple_graph(con, triples) -> dict:
     nodes, edges = {}, []
     for t in triples:
@@ -701,7 +858,7 @@ def _log(response):
     if os.getenv('FILMGRAPH_TRACE_LOG', '1') != '1':
         return
     try:
-        with open('data/traces.jsonl', 'a') as fh:
+        with open(settings.get('paths.traces_log'), 'a') as fh:
             fh.write(json.dumps({'at': time.time(), 'question': response['question'], 'intent': response['intent'],
                                  'method': response['method'], 'confidence': response['confidence'], 'flow': response.get('flow'),
                                  'backend': response['backend'], 'total_ms': response['total_ms'],

@@ -49,7 +49,7 @@ NOT_PEOPLE = {'total length', 'length', 'instrumental', 'chorus', 'original song
               'others', 'unknown', 'n a', 'na', 'tba', 'tbd', 'theme music', 'bgm', 'traditional', 'title song'}
 
 KG_SCHEMA = """
-DROP TABLE IF EXISTS kg_person_map; DROP TABLE IF EXISTS kg_film_map;
+DROP TABLE IF EXISTS kg_person_map; DROP TABLE IF EXISTS kg_film_map; DROP TABLE IF EXISTS kg_appearances;
 DROP TABLE IF EXISTS kg_people; DROP TABLE IF EXISTS kg_films; DROP TABLE IF EXISTS kg_credits;
 DROP TABLE IF EXISTS kg_songs; DROP TABLE IF EXISTS kg_song_credits; DROP TABLE IF EXISTS kg_facts;
 DROP TABLE IF EXISTS kg_aliases;

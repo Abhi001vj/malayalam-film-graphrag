@@ -327,7 +327,7 @@ def assign_roles(question: str, entities: list[dict]) -> None:
             # "directed by X" binds forward; "X directed" binds backward
             forward = p['start'] >= end
             # "composed by X" binds forward; "X composed" binds backward
-            by_follows = end < len(tokens) and tokens[end] == 'by'
+            by_follows = end < len(tokens) and tokens[end] == 'by' or tokens[start] in ('starring', 'featuring')
             bias = 0 if forward == by_follows or (forward and not by_follows and start == 0) else 3
             return (p['start'] - end if forward else start - p['end'] + 1) + penalty + bias
         target = min(people, key=distance)

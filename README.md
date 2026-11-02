@@ -41,7 +41,10 @@ More detail: [`docs/graphrag.md`](docs/graphrag.md) (architecture, diagram, desi
 | help / handover / out of scope | *talk to a human* | canned flows; handover writes a ticket and posts to Slack if configured |
 
 **Relationship-aware answers.**
-- *Actors named together* ("Mohanlal and Mammootty movies") means films **both acted in**.
+- *Actors named together* ("Mohanlal and Mammootty movies") means films where **both play a real role on screen**.
+  Cameos, appearances as themselves, voice/narration and archive footage are listed separately with the reason
+  (from `kg_appearances`, built from the cast-line text and infobox of each film page). The graph puts the two people
+  on either side and the films between them, with one styled edge per credit.
 - *Mixed professions* ("Mohanlal and M. G. Sreekumar") counts any shared credit and breaks it down by pairing, e.g.
   *Mohanlal actor × M. G. Sreekumar singer: 54 films · actor/singer × singer: 13*.
 - A person plus a place, technology, genre or company ("Mohanlal films shot in Ooty") must satisfy **both** constraints.
@@ -122,6 +125,7 @@ ollama pull embeddinggemma               # + a chat model; default FILMGRAPH_LLM
 
 # derived GraphRAG layers (minutes)
 .venv/bin/filmgraph build-kg
+.venv/bin/filmgraph build-appearances        # role / cameo / as-self / voice / archive per acting credit (~3 min, cached pages)
 .venv/bin/filmgraph build-chunks && .venv/bin/filmgraph embed
 .venv/bin/filmgraph extract-triples --llm-films 60
 .venv/bin/filmgraph communities --summaries 25
@@ -138,6 +142,12 @@ NEO4J_URI=bolt://localhost:7687 NEO4J_PASSWORD=filmgraph-local FILMGRAPH_LOCAL_G
 
 All settings are in [`.env.example`](.env.example): Neo4j/AuraDB credentials, LLM provider (`ollama` | `openai`-compatible | `none`),
 Slack handover webhook, Supabase keys, local guest limit.
+
+The **⚙ Settings** dialog (next to *My collection*) overrides data paths, models and graph backend, which sources count
+(and which count as ✓ confirmed), which prose relations are answered, and which credits connection paths walk through.
+Defaults are the env/built-in values above. Only changed values are saved, to `data/settings.json` (`FILMGRAPH_SETTINGS`),
+and they apply from the next question. Saving works only from a local (loopback) request, and settings are read-only on Vercel.
+Secrets stay in `.env`.
 
 ## 4. Hosted version (Vercel + Supabase)
 

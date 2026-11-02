@@ -49,6 +49,14 @@ function traceView(data) {
 function cardView(card) {
   const c = el('article', 'film-card');
   c.append(el('div', 'film-number', (card.year || 'Year ?') + (card.imdb_rating ? ' · IMDb ' + card.imdb_rating : '')), el('h3', '', card.title));
+  if (card.bucket) {
+    const tag = el('div', 'bucket-tag ' + card.bucket, card.bucket_label);
+    const why = Object.entries(card.evidence?.people || {}).filter(([, v]) => v.appearance && v.appearance.kind !== 'role')
+      .map(([n, v]) => `${n}: ${v.appearance.label}` + (v.appearance.evidence ? ` — “${v.appearance.evidence.slice(0, 80)}”` : ''));
+    if (why.length) tag.title = why.join('\n');
+    c.append(tag);
+    if (why.length) c.append(el('div', 'bucket-why', why.join(' · ')));
+  }
   if (card.evidence) {
     const ev = el('div', 'evidence ' + (card.evidence.confirmed ? 'ok' : 'weak'),
       (card.evidence.confirmed ? '✓ Confirmed on Wikipedia' : '⚠ Weak evidence') + ' · ' +
@@ -132,7 +140,7 @@ async function chat(question, overrides) {
       $('#query-description').textContent = (data.total != null ? data.total.toLocaleString() + ' films · ' : '') + data.intent.replace(/_/g, ' ') + ' · via ' + data.backend;
       drawGraph();
       const ids = (data.graph.highlight || []).filter(id => state.network?.body.data.nodes.get(id));
-      if (ids.length) state.network.selectNodes(ids);
+      if (ids.length && data.graph.layout !== 'fixed') state.network.selectNodes(ids);
     }
     if (data.cards?.length) {
       $('#results').replaceChildren(...data.cards.map(cardView));

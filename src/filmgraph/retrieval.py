@@ -23,7 +23,12 @@ RRF_K = 10
 # Dense evidence counts double: on paraphrased plot questions BM25 mostly adds noise, but it still rescues
 # exact names/rare terms. Chosen on evals/plot_gold.jsonl (29 questions) -- see evals/report.md.
 RRF_WEIGHTS = (1.0, 0.5)
-VECTORS = Path('data/vectors')
+VECTORS = Path('data/vectors')  # default; the settings page can point elsewhere
+
+
+def _vectors() -> Path:
+    from . import settings
+    return Path(settings.get('paths.vectors_dir'))
 
 
 def _split(text: str) -> list[str]:
@@ -64,7 +69,8 @@ def build_chunks(con: sqlite3.Connection) -> int:
 
 
 def build_embeddings(con: sqlite3.Connection, batch: int = 64, log=print) -> int:
-    VECTORS.mkdir(parents=True, exist_ok=True)
+    vectors = _vectors()
+    vectors.mkdir(parents=True, exist_ok=True)
     rows = con.execute('SELECT id, text FROM kg_chunks ORDER BY id').fetchall()
     ids = np.array([r[0] for r in rows], dtype=np.int64)
     matrix = np.zeros((len(rows), 768), dtype=np.float32)
@@ -75,8 +81,8 @@ def build_embeddings(con: sqlite3.Connection, batch: int = 64, log=print) -> int
         matrix[start:start + len(part)] = llm.embed(['title: none | text: ' + r[1] for r in part])
         if start // batch % 20 == 0:
             log(f'Embedded {start + len(part)}/{len(rows)} chunks ({time.time() - started:.0f}s)')
-    np.save(VECTORS / 'chunk_ids.npy', ids)
-    np.save(VECTORS / 'chunk_vectors.npy', matrix)
+    np.save(vectors / 'chunk_ids.npy', ids)
+    np.save(vectors / 'chunk_vectors.npy', matrix)
     _index.cache_clear()
     return len(rows)
 
@@ -86,8 +92,9 @@ _cache: dict = {}
 
 def _index():
     if 'm' not in _cache:
-        path = VECTORS / 'chunk_vectors.npy'
-        _cache['m'] = (np.load(VECTORS / 'chunk_ids.npy'), np.load(path)) if path.exists() else (None, None)
+        vectors = _vectors()
+        path = vectors / 'chunk_vectors.npy'
+        _cache['m'] = (np.load(vectors / 'chunk_ids.npy'), np.load(path)) if path.exists() else (None, None)
     return _cache['m']
 _index.cache_clear = lambda: _cache.clear()
 

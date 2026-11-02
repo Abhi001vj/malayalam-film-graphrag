@@ -45,6 +45,7 @@ def main() -> None:
     query.add_argument("--vectors", action="store_true", help="Use built semantic vectors")
     sub.add_parser("build-vectors", help="Embed story documents using the optional model")
     sub.add_parser("build-kg", help="Entity resolution -> canonical kg_* tables")
+    sub.add_parser("build-appearances", help="Classify acting credits: role / cameo / self / voice / archive")
     sub.add_parser("build-chunks", help="Chunk lead/plot/production text into the lexical graph")
     sub.add_parser("embed", help="Embed chunks with the local Ollama embedding model")
     tri = sub.add_parser("extract-triples", help="Link-anchored triple extraction from cached film pages")
@@ -110,6 +111,9 @@ def main() -> None:
         elif args.command == "build-kg":
             from .kg import build_kg
             print(json.dumps(build_kg(con), indent=2))
+        elif args.command == "build-appearances":
+            from .appearance import build_appearances
+            print(json.dumps(build_appearances(con), indent=2))
         elif args.command == "build-chunks":
             from .retrieval import build_chunks
             print(f"{build_chunks(con)} chunks")
