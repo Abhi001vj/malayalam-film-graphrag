@@ -74,6 +74,10 @@ def snapshot(con, destination=Path('data/deploy.sqlite3.gz'),include_imdb=False)
             from .retrieval import build_chunks
             from .communities import detect
             report_kg=build_kg(target)
+            # Role / cameo / self / voice / archive per acting credit. Without it, "X and Y acted together" counts
+            # narration and cameos (e.g. Barroz, Pathonpatham Noottandu) as shared screen roles.
+            from .appearance import build_appearances
+            build_appearances(target,log=lambda *a,**k:None)
             build_chunks(target)
             if target.execute("SELECT 1 FROM sqlite_master WHERE name='kg_entities'").fetchone():
                 target.execute("UPDATE kg_entities SET kg_id=NULL")

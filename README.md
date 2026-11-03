@@ -1,5 +1,8 @@
 # Malayalam FilmGraph — GraphRAG over Malayalam cinema
 
+**Live demo: [malayalam-filmgraph.vercel.app](https://malayalam-filmgraph.vercel.app)** — ask in plain English, then open
+*How this was answered* to see the entities, intent scores and the exact SQL behind every answer.
+
 A proof-of-concept **GraphRAG** system: a knowledge graph of Malayalam cinema (films, people, songs, places,
 remakes, adaptations, awards) that you can question in plain English. It shows answers as chat cards with
 Wikipedia / IMDb / YouTube / where-to-watch links, an interactive graph that highlights the result, and a
@@ -22,6 +25,86 @@ More detail: [`docs/graphrag.md`](docs/graphrag.md) (architecture, diagram, desi
 [`docs/product-and-cost-plan.md`](docs/product-and-cost-plan.md) (product, quotas, costs).
 
 ---
+
+## 0. Try it
+
+Answers below are from the live demo (hosted mode: no LLM, every number comes from a graph query).
+
+| Question | Answer (abridged) |
+|---|---|
+| *How many films did Mohanlal and Mammootty do together?* | **53 films** with both on screen: 46 in full roles, 7 where one is a cameo or plays himself. Narration-only credits (*Barroz*, *Pathonpatham Noottandu*) are listed separately |
+| *Mohanlal actor and Priyadarshan director* | **30 films** (1984–2021), e.g. *Marakkar* (2021), *Oppam* (2016) |
+| *Which director has Mammootty worked with most?* | **Joshiy** and **I. V. Sasi**, 33 films each |
+| *Who directed Chemmeen?* | **Ramu Kariat** (1966) |
+| *Songs sung by K. J. Yesudas composed by Raveendran* | **174 songs** (1979–2006) |
+| *How is Fahadh Faasil connected to Prem Nazir?* | **2 films apart**, via M. B. Sreenivasan |
+| *Which films are remakes of Manichitrathazhu?* | *Chandramukhi* and 3 more, each with its evidence sentence |
+| *Films shot in Munnar* | **10 films** (2011–2025) |
+| *Films like Kireedam* | *Chenkol* first: shared creatives fused with plot similarity |
+| *Mohanlal movies in the 90s* | **65 films** (1990–1999) |
+
+Follow-ups keep context: *Mohanlal and Mammootty films* → *what about with Priyadarshan?* → *only in the 90s*.
+
+### Architecture: local full version vs hosted demo
+
+```mermaid
+flowchart LR
+  subgraph Local["Local (laptop): full GraphRAG"]
+    direction TB
+    SRC["Wikipedia · Wikidata · IMDb (local only)"] --> BUILD["Build pipeline<br/>collect → resolve → extract → embed → communities"]
+    BUILD --> DB[("films.sqlite3<br/>raw claims + kg_* graph")]
+    DB --> NEO[("Neo4j<br/>(optional)")]
+    DB & NEO --> SRV["filmgraph serve"]
+    OLL["Ollama: Gemma 4 + embeddinggemma"] --> SRV
+  end
+  DB -- "filmgraph snapshot<br/>IMDb stripped, graph rebuilt" --> SNAP[("deploy.sqlite3.gz<br/>read-only")]
+  subgraph Hosted["Vercel (hosted demo): no LLM, $0"]
+    direction TB
+    EDGE["Vercel edge<br/>DDoS · WAF rate limit · bot rules"] --> FN["Python function<br/>same server code"]
+    FN --> RO[("SQLite in /tmp<br/>PRAGMA query_only")]
+  end
+  SNAP --> RO
+  USER(("Visitor")) --> EDGE
+```
+
+### Build process (offline)
+
+```mermaid
+flowchart LR
+  A["Wikipedia film lists<br/>1928 → today"] --> B["Film pages<br/>infobox · cast · songs · plot"]
+  W["Wikidata claims"] --> C
+  B --> C[("Raw claims<br/>every row keeps its source URL")]
+  C --> D["Entity resolution<br/>shared IDs → name blocking"]
+  D --> E[("Canonical graph kg_*<br/>films · people · credits")]
+  B --> F["Triples from prose<br/>hyperlinks → types → cue rules → LLM relabel"]
+  F --> E
+  E --> AP["Appearance types<br/>role · cameo · self · voice · archive"]
+  B --> G["Chunks → BM25 + embeddings"] --> E
+  E --> H["Louvain communities + reports"]
+  E --> I["Snapshot for hosting<br/>drop IMDb, rebuild graph, gzip"]
+```
+
+### How one question is answered
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as Visitor
+  participant API as /api/chat
+  participant NLU as NLU
+  participant R as Intent router
+  participant G as Graph query
+  participant C as Answer composer
+  U->>API: "Mohanlal actor and Priyadarshan director"
+  API->>API: rate limits · size and origin checks
+  API->>NLU: question
+  NLU->>NLU: gazetteer finds 2 people, binds roles actor / director
+  NLU->>R: "PERSON actor and PERSON director"
+  R->>R: rules → classifier (TF-IDF + LR) → intent = collaboration
+  R->>G: films_with(Mohanlal as actor, Priyadarshan as director)
+  G-->>C: films with provenance per credit
+  C-->>U: count + film cards + answer subgraph + trace (SQL, scores, timings)
+```
 
 ## 1. What you can ask
 
@@ -149,29 +232,43 @@ Defaults are the env/built-in values above. Only changed values are saved, to `d
 and they apply from the next question. Saving works only from a local (loopback) request, and settings are read-only on Vercel.
 Secrets stay in `.env`.
 
-## 4. Hosted version (Vercel + Supabase)
+## 4. Hosted version (Vercel)
 
-- **Rate limits** are enforced atomically in Postgres by `filmgraph_consume_quota` and reached through the HMAC-signed
-  `filmgraph-gateway` edge function. The service key never reaches the browser.
+The live demo runs in **public demo mode**: a read-only snapshot of the graph inside one Python function, with no
+database server, no accounts and no LLM. Supabase accounts (below) are optional and currently switched off.
 
-  | Tier | Per minute | Per day | Identity |
-  |---|---|---|---|
-  | Guest (not signed in) | 5 | 20 distinct questions | HMAC of client IP |
-  | Member (signed in) | 20 | 200 | Supabase user |
-  | Paid (**not enabled**; schema ready) | 60 | unlimited | `filmgraph_private.plans.tier='paid'` |
+- **No LLM runs on the server.** Answers use rules + classifier + graph; plot search uses BM25 only (no vectors), so
+  plot recall is lower than locally (see `evals/report.md`). The classifier ships as JSON weights
+  (`src/filmgraph/models/intent.json`), so the function needs only NumPy. `/model-lab.html` can load a small model in
+  the visitor's browser (opt-in).
+- **IMDb data never deploys.** `filmgraph snapshot` strips IMDb-sourced claims, re-attributes credits that
+  Wikipedia/Wikidata also support, then **rebuilds every derived table** (graph, appearance types, chunks,
+  communities). Hosted counts are therefore a little lower than local ones. `python scripts/check_snapshot.py`
+  compares the top 300 people between the full graph and the snapshot before each deploy.
+- **Safety layers**
 
-  Every request counts toward the minute window; repeating a question does not use another daily question. Blocked
-  requests return HTTP 429 with `Retry-After`.
-- **Supabase project** `malayalam-filmgraph` (ap-south-1, free tier) has the schema applied: private, RLS-protected
-  favourites/watchlist/follows/preferences plus the quota tables. The gateway is deployed, and the security advisor reports no issues.
-- **No LLM runs on the server.** Hosted answers use rules + classifier + graph; plot search uses BM25. The trained
-  classifier ships as JSON weights (`src/filmgraph/models/intent.json`, identical predictions to scikit-learn),
-  so the function needs only NumPy. Users can opt into an in-browser model (`/model-lab.html`).
-- **IMDb data never deploys.** `filmgraph snapshot` strips IMDb-sourced credits, ratings and people. Credits also
-  confirmed by Wikipedia/Wikidata are kept and re-attributed. It then **rebuilds every derived graph table** from
-  the cleaned data, so hosted counts can be slightly lower than local ones.
-- Deploy: `filmgraph snapshot && vercel` with `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `FILMGRAPH_GATEWAY_SECRET`
-  set in Vercel. The same secret goes in the Supabase edge function secrets.
+  | Layer | Protection |
+  |---|---|
+  | Vercel edge | automatic DDoS mitigation; WAF rule blocking exploit probes (`/.env`, `/wp-admin`, …); rate limit 120 API requests/min per IP; AI-bot ruleset |
+  | Function | 60 API calls/min per IP; 10 questions/min and 40 distinct questions/day per visitor; JSON-only POST, same-origin check, 64 KB body cap, bounded `limit`/`offset`; 20 s max duration |
+  | Data | SQLite opened with `PRAGMA query_only` (writes fail); parameterised SQL only; the browser can send a whitelisted query plan, never SQL or Cypher |
+  | Responses | CSP, `nosniff`, Referrer-Policy, Permissions-Policy, COOP; `X-Robots-Tag: noindex` on `/api/`; settings endpoint hides paths and hosts |
+  | Crawlers | `robots.txt` allows the home page, disallows `/api/` and blocks AI-training crawlers |
+
+  `tests/test_hosted_safety.py` covers the demo limits, read-only mode, settings redaction and throttling.
+- **Deploy** from a machine that has the snapshot (Git builds are disabled because the snapshot is git-ignored):
+
+  ```bash
+  filmgraph snapshot && python scripts/check_snapshot.py && vercel deploy --prod
+  ```
+
+  Vercel environment: `FILMGRAPH_PUBLIC_DEMO=1`, `FILMGRAPH_READONLY=1`, `FILMGRAPH_LLM=none`, `FILMGRAPH_GRAPH=sqlite`,
+  `FILMGRAPH_TRACE_LOG=0`, `FILMGRAPH_ACCOUNTS_DB=/tmp/filmgraph-accounts.sqlite3`. The project's framework preset
+  must be **Other**; the Python preset ignores `api/`.
+- **Optional accounts (Supabase, off).** Setting `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and
+  `FILMGRAPH_GATEWAY_SECRET` (min 32 bytes, also stored in the edge function secrets) switches quotas to Postgres
+  (`filmgraph_consume_quota` behind the HMAC-signed `filmgraph-gateway`) and enables sign-in, favourites and feedback.
+  Free Supabase projects pause after 7 idle days, which is why the public demo does not depend on it.
 
 ## 5. Costs
 
@@ -202,6 +299,8 @@ Wikipedia attribution / share-alike for reused text.
 - Prose triples cover hyperlinked phrases only (precision over recall). LLM relabelling has run on 60 films so far.
 - The gold sets (50 structured + 29 plot questions) are hand-built regression suites, not a benchmark. RRF weights were chosen on the plot set.
 - The browser UI was verified through its API and syntax checks; a full visual pass in Chrome is still pending.
+- Without IMDb identifiers, a few spelling variants stay separate in the hosted graph (e.g. "G. Venkitaraman" vs
+  Wikipedia's "G. Venkittaraman"); the credits are present under the Wikipedia spelling.
 
 ## 8. Repository layout
 
