@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import unicodedata
@@ -117,6 +118,8 @@ def connect(path: str | Path) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=30, factory=Connection)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    if os.environ.get('FILMGRAPH_READONLY') == '1':
+        con.execute('PRAGMA query_only=ON')  # hosted catalogue: any INSERT/UPDATE/DELETE/DDL now fails
     return con
 
 

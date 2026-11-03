@@ -1,8 +1,12 @@
 """Shared local and Vercel HTTP handler for the cinema explorer."""
 from __future__ import annotations
+import copy
 import json
 import gzip
 import mimetypes
+import os
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -11,6 +15,54 @@ from .search import search, coverage, film_detail, person_graph
 from . import accounts, settings
 
 STATIC = Path(__file__).parent / 'static'
+API_PER_MINUTE = int(os.environ.get('FILMGRAPH_API_PER_MINUTE', '60'))  # all /api calls, per IP, per instance
+_hits: dict[str, list] = {}
+_hits_lock = threading.Lock()
+HIDDEN = '(hidden on the hosted demo)'
+
+
+def client_ip(handler) -> str:
+    # The forwarded header is trusted only behind Vercel's proxy, which overwrites it.
+    ip = handler.headers.get('x-vercel-forwarded-for', '').split(',')[0].strip() if os.environ.get('VERCEL') else ''
+    return ip or handler.client_address[0]
+
+
+def throttled(ip: str) -> int:
+    """Fixed one-minute window per IP. Returns seconds to wait, or 0 if the request may proceed."""
+    window = int(time.time() // 60)
+    with _hits_lock:
+        if len(_hits) > 10000:  # bound memory under a flood of spoofed or rotating IPs
+            _hits.clear()
+        start, count = _hits.get(ip, (window, 0))
+        if start != window:
+            start, count = window, 0
+        if count >= API_PER_MINUTE:
+            return 60 - int(time.time() % 60)
+        _hits[ip] = (start, count + 1)
+    return 0
+
+
+def bounded(raw, default: int, low: int, high: int) -> int:
+    try:
+        return min(high, max(low, int(raw)))
+    except (TypeError, ValueError):
+        return default
+
+
+def public_settings(info: dict) -> dict:
+    """Hosted servers do not reveal file paths, model hosts or database URIs."""
+    info = copy.deepcopy(info)
+    info['file'] = HIDDEN
+    for block in ('defaults', 'current', 'saved'):
+        group = info.get(block) or {}
+        if isinstance(group.get('paths'), dict):
+            group['paths'] = {k: HIDDEN for k in group['paths']}
+        models = group.get('models')
+        if isinstance(models, dict):
+            for key in ('ollama_host', 'llm_base_url', 'neo4j_uri', 'neo4j_username', 'neo4j_database'):
+                if key in models:
+                    models[key] = HIDDEN
+    return info
 
 
 def make_handler(db_path: str, use_vectors: bool = False):
@@ -38,13 +90,15 @@ def make_handler(db_path: str, use_vectors: bool = False):
                 origin=self.headers.get('Origin')
                 if origin and urlparse(origin).netloc!=self.headers.get('Host'):
                     return self.json_response({'error':'Origin not allowed'},403)
+                path=urlparse(self.path).path
+                wait=throttled(client_ip(self))
+                if wait:return self.json_response({'error':f'Too many requests. Try again in {wait} s.'},429,[('Retry-After',str(wait))])
                 if not self.headers.get('Content-Type','').startswith('application/json'):
                     return self.json_response({'error':'Use application/json'},415)
                 size=int(self.headers.get('Content-Length','0'))
                 if size<1 or size>65536:return self.json_response({'error':'Invalid request size'},413)
                 body=json.loads(self.rfile.read(size))
                 if not isinstance(body,dict):raise ValueError('JSON object required')
-                path=urlparse(self.path).path
                 if path.startswith('/api/auth/'):
                     data,headers=accounts.auth(path.rsplit('/',1)[-1],body,self)
                     return self.json_response(data,headers=headers)
@@ -68,9 +122,11 @@ def make_handler(db_path: str, use_vectors: bool = False):
                             validate_plan(con,plan,question)
                         quota=self.quota(question,filters)
                         if quota is None:return
-                        data=search(con,question,int(body.get('limit',20)),use_vectors,int(body.get('offset',0)),filters,query_plan=plan)
+                        data=search(con,question,bounded(body.get('limit'),20,1,50),use_vectors,bounded(body.get('offset'),0,0,5000),filters,query_plan=plan)
                         data['quota']=quota
                     elif path=='/api/feedback':
+                        if accounts.public_demo() and not accounts.enabled():
+                            raise accounts.AccountError('Feedback is turned off on the public demo.',503)
                         from .feedback import submit
                         data=submit(self,body)
                     elif path=='/api/chat':
@@ -104,9 +160,13 @@ def make_handler(db_path: str, use_vectors: bool = False):
             parsed=urlparse(self.path);query=parse_qs(parsed.query)
             value=lambda key,default='':query.get(key,[default])[0]
             try:
+                if parsed.path.startswith('/api/'):
+                    wait=throttled(client_ip(self))
+                    if wait:return self.json_response({'error':f'Too many requests. Try again in {wait} s.'},429,[('Retry-After',str(wait))])
                 if parsed.path=='/api/settings':
                     with connect(settings.get('paths.db')) as con:
-                        return self.json_response(settings.describe(con))
+                        info=settings.describe(con)
+                        return self.json_response(info if settings.writable() else public_settings(info))
                 if parsed.path.startswith('/api/'):
                     with connect(settings.get('paths.db')) as con:
                         if parsed.path in {'/api/search','/api/chat'}:
@@ -116,8 +176,8 @@ def make_handler(db_path: str, use_vectors: bool = False):
                                 question='all movies'
                             quota=self.quota(question,filters)
                             if quota is None:return
-                            data=search(con,question,int(value('limit','20')),use_vectors,
-                                        int(value('offset','0')),filters)
+                            data=search(con,question,bounded(value('limit','20'),20,1,50),use_vectors,
+                                        bounded(value('offset','0'),0,0,5000),filters)
                             data['quota']=quota
                         elif parsed.path in {'/api/stats','/api/coverage'}:data=coverage(con)
                         elif parsed.path=='/api/entities':
@@ -166,6 +226,10 @@ def make_handler(db_path: str, use_vectors: bool = False):
             self.send_header('Cache-Control','no-store' if content_type.startswith(('application/json','text/html')) else 'public, max-age=3600')
             self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Referrer-Policy','strict-origin-when-cross-origin')
+            self.send_header('Permissions-Policy','camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+            self.send_header('Cross-Origin-Opener-Policy','same-origin')
+            if urlparse(self.path).path.startswith('/api/'):
+                self.send_header('X-Robots-Tag','noindex, nofollow')
             if urlparse(self.path).path=='/model-lab.html':
                 policy="default-src 'self'; script-src 'self' https://esm.sh 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
             else:

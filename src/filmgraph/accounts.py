@@ -99,23 +99,40 @@ def consume_quota(handler,question,filters):
     if enabled():
         guest=hmac.new(SECRET.encode(),ip.encode(),hashlib.sha256).hexdigest()
         return gateway({'action':'quota','access_token':token,'guest_key':guest,'fingerprint':fingerprint})
-    if os.environ.get('VERCEL'):
+    if os.environ.get('VERCEL') and not public_demo():
         raise AccountError('Account service must be configured before public queries are enabled',503)
-    day=datetime.now(timezone.utc).date().isoformat()
+    now=datetime.now(timezone.utc);day=now.date().isoformat();minute=now.strftime('%Y-%m-%dT%H:%M')
     from . import settings
     path=Path(settings.get('paths.accounts_db'));path.parent.mkdir(parents=True,exist_ok=True)
+    limit=int(os.environ.get('FILMGRAPH_LOCAL_GUEST_LIMIT','20'))  # per day, distinct questions
+    # every request counts, repeats included; tight only on the public demo
+    per_minute=int(os.environ.get('FILMGRAPH_GUEST_PER_MINUTE','5' if public_demo() else '1000'))
     with closing(sqlite3.connect(path,timeout=30)) as con:
         con.execute('CREATE TABLE IF NOT EXISTS usage(subject TEXT,day TEXT,fingerprint TEXT,PRIMARY KEY(subject,day,fingerprint))')
+        con.execute('CREATE TABLE IF NOT EXISTS usage_minute(subject TEXT,minute TEXT,n INTEGER,PRIMARY KEY(subject,minute))')
         con.execute('BEGIN IMMEDIATE')
         con.execute('DELETE FROM usage WHERE day<?',(day,))
+        con.execute('DELETE FROM usage_minute WHERE minute<?',(minute,))
+        recent=(con.execute('SELECT n FROM usage_minute WHERE subject=? AND minute=?',(guest,minute)).fetchone() or [0])[0]
+        if recent>=per_minute:
+            con.commit()
+            return {'allowed':False,'reason':'minute','limit_per_minute':per_minute,'retry_after':60-now.second,
+                    'limit':limit,'user':None,'mode':'public demo' if public_demo() else 'local guest'}
+        con.execute('INSERT INTO usage_minute VALUES(?,?,1) ON CONFLICT(subject,minute) DO UPDATE SET n=n+1',(guest,minute))
         count=con.execute('SELECT count(*) FROM usage WHERE subject=? AND day=?',(guest,day)).fetchone()[0]
         seen=con.execute('SELECT 1 FROM usage WHERE subject=? AND day=? AND fingerprint=?',(guest,day,fingerprint)).fetchone()
-        limit=int(os.environ.get('FILMGRAPH_LOCAL_GUEST_LIMIT','20'))  # local demo override; hosted limits live in the gateway
         allowed=bool(seen or count<limit)
         if allowed and not seen:
             con.execute('INSERT INTO usage VALUES(?,?,?)',(guest,day,fingerprint));count+=1
         con.commit()
-    return {'allowed':allowed,'limit':limit,'used':count,'remaining':max(0,limit-count),'reset':'00:00 UTC','user':None,'mode':'local guest'}
+    return {'allowed':allowed,'limit':limit,'used':count,'remaining':max(0,limit-count),'reset':'00:00 UTC','user':None,
+            'mode':'public demo' if public_demo() else 'local guest'}
+
+
+def public_demo():
+    """Hosted read-only demo without Supabase: per-instance guest limits in /tmp, no accounts, no stored feedback.
+    The Vercel Firewall rate limit is the cross-instance backstop."""
+    return os.environ.get('FILMGRAPH_PUBLIC_DEMO')=='1'
 
 
 def account_data(handler):

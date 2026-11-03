@@ -22,3 +22,5 @@ data/traces.jsonl
 data/handover.jsonl
 data/deploy.sqlite3.gz
 data/deploy.sqlite3.coverage.json
+.vercel
+.env*

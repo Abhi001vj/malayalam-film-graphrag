@@ -637,7 +637,7 @@ def flow_similar_films(con, store, q, entities, slots, use_llm, trace):
     cards = [film_card(con, f) for f in fused]
     lines = [f"{i + 1}. **{c['title']}** ({c['year']}) — " + (('shares ' + ', '.join(dict.fromkeys(why[f]))[:110]) if f in why else 'similar story')
              for i, (f, c) in enumerate(zip(fused, cards))]
-    text = f"Films like **{film['name']}**, ranked by shared creatives (graph) fused with plot similarity (vectors):\n" + '\n'.join(lines)
+    text = f"Films like **{film['name']}**, ranked by shared creatives (graph) fused with plot similarity:\n" + '\n'.join(lines)
     return {'answer': text, 'cards': cards, 'graph': film_graph(con, [film['id']] + fused, [])}
 
 

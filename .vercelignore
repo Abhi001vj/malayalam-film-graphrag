@@ -18,3 +18,7 @@ data/private
 data/backups
 .vercel-session
 supabase
+data/vectors
+data/traces.jsonl
+data/handover.jsonl
+.env.local

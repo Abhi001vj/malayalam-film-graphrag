@@ -57,13 +57,15 @@ def snapshot(con, destination=Path('data/deploy.sqlite3.gz'),include_imdb=False)
                         if identifier.startswith('wiki:'):
                             title=unquote(identifier[5:]).replace('_',' ')
                             names.add(title);names.add(title.rsplit(' (',1)[0])
-                    if not pid.startswith(('imdb:','Q')) or not names:
-                        # Non-IMDb, source-scoped identities were never matched on guessed names.
-                        if not pid.startswith('imdb:'):names.add(person['name'])
+                    # Every non-IMDb identity keeps its current name (from Wikipedia/Wikidata) as an alias.
+                    if not pid.startswith('imdb:'):names.add(person['name'])
                     if pid.startswith(('demo:','unresolved:')):names.update(old_aliases.get(pid,[]))
                     if not names:continue
+                    # Only IMDb-keyed people are renamed to a public name. Renaming anyone else, e.g. to a page title
+                    # ("Priyadarsan") or the shortest Wikidata label ("Ousepachan", "MG Sreekumar"), breaks the
+                    # same-name merge in build_kg, splits one person into several and loses the usual spelling.
                     english=sorted((n for n in names if n.isascii() and ' (' not in n),key=lambda n:(len(n),n))
-                    if english:target.execute('UPDATE people SET name=? WHERE id=?',(english[0],pid))
+                    if english and pid.startswith('imdb:'):target.execute('UPDATE people SET name=? WHERE id=?',(english[0],pid))
                     for name in names:
                         target.execute('INSERT OR IGNORE INTO aliases VALUES(?,?,?)',(pid,name,normalize(name)))
             target.commit()
