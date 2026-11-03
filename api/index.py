@@ -20,4 +20,6 @@ if not database.exists():
         import shutil
         shutil.copyfileobj(source,dest)
     temporary.replace(database)
-handler=make_handler(str(database))
+# Vercel finds the function by a top-level class named `handler` (a BaseHTTPRequestHandler subclass).
+class handler(make_handler(str(database))):
+    pass
