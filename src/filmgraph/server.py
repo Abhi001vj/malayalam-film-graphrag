@@ -232,6 +232,9 @@ def make_handler(db_path: str, use_vectors: bool = False):
                 self.send_header('X-Robots-Tag','noindex, nofollow')
             if urlparse(self.path).path=='/model-lab.html':
                 policy="default-src 'self'; script-src 'self' https://esm.sh 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
+            elif urlparse(self.path).path in ('/','/index.html'):
+                # Smart answers load WebLLM from esm.sh (pinned version) and model weights over HTTPS; nothing else changes.
+                policy="default-src 'self'; script-src 'self' https://esm.sh 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self' chrome-extension:"
             else:
                 policy="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self' chrome-extension:"
             self.send_header('Content-Security-Policy',policy)

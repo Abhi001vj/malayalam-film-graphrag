@@ -30,3 +30,10 @@
 .caption-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:7px}.caption-key{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#5d7259}.caption-key i{width:22px;height:0;border-top:2px solid #4c7a52}.caption-key.cameo i{border-top:2px dashed #c79a45}.caption-key.offscreen i{border-top:2px dashed #a99c79}.caption-key.unconfirmed i{border-top:2px dotted #b7bdb0}
 .bucket-tag{display:inline-block;margin:4px 0 2px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;background:#e6edd8;color:#2f553a}.bucket-tag.cameo{background:#fbefd6;color:#7a5a1e}.bucket-tag.offscreen{background:#f1eee4;color:#6f6a58}.bucket-tag.unconfirmed{background:#f0f1ec;color:#7c8378}.bucket-why{font-size:10px;line-height:1.5;color:#87601f;margin:2px 0 4px}
 @media(max-width:740px){.graph-caption{font-size:10px;padding:8px 10px}.graph-caption+#graph{top:130px}}
+/* Smart answers (Gemma in the browser) — same palette as evidence tags */
+.smart-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.4em;font-size:.92em}.smart-controls select{font:inherit;max-width:100%}
+.smart-status{color:#5d6b57;font-size:.9em}
+.smart-answer{border-left:3px solid #3d5a32;padding:2px 0 2px 10px;margin-bottom:.6em}
+.smart-badge{display:inline-block;margin-bottom:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;background:#f1eee4;color:#6f6a58}
+.smart-badge.ok{background:#e6f0e0;color:#3d5a32}.smart-badge.withheld{background:#f6ead2;color:#7a5a1e}
+.graph-facts{font-size:.92em;opacity:.92}
