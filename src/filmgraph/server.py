@@ -140,6 +140,11 @@ def make_handler(db_path: str, use_vectors: bool = False):
                         if quota is None:return
                         data=answer(con,question,context,overrides,body.get('use_llm') is not False,backend)
                         data['quota']=quota
+                        try:
+                            from .compare import typical_rag
+                            data['baseline']=typical_rag(con,question)  # what plain chunk-RAG would retrieve
+                        except Exception:
+                            data['baseline']=None
                     elif path in {'/api/library','/api/preferences','/api/follow','/api/delete_account'}:
                         data=accounts.update_private(self,path.rsplit('/',1)[-1],body,con)
                     elif path=='/api/recommendations':

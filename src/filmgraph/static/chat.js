@@ -135,6 +135,12 @@ async function chat(question, overrides) {
     m.append(traceView(data));
     $('#chat-log').append(m); $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
     smartAnswer(question, data, m, body);
+    if (window.FilmGraphRAGPanel) {
+      window.FilmGraphRAGPanel.render(question, data);
+      const how = el('button', 'quiet rp-inline', 'How GraphRAG answered this vs typical RAG ↗');
+      how.onclick = () => { window.FilmGraphRAGPanel.render(question, data); window.FilmGraphRAGPanel.open(); };
+      body.after(how);
+    }
     if (data.graph?.nodes?.length) {
       state.graph = {...data.graph, note: `${data.graph.nodes.length} nodes from the ${data.intent} answer`};
       $('#query-title').textContent = (data.entities || []).filter(e => ['PERSON', 'FILM', 'PLACE'].includes(e.type)).map(e => e.name).join(' × ') || question;

@@ -37,3 +37,27 @@
 .smart-badge{display:inline-block;margin-bottom:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;background:#f1eee4;color:#6f6a58}
 .smart-badge.ok{background:#e6f0e0;color:#3d5a32}.smart-badge.withheld{background:#f6ead2;color:#7a5a1e}
 .graph-facts{font-size:.92em;opacity:.92}
+/* GraphRAG vs typical RAG sidebar — same palette as the explorer */
+.rp-open{margin-left:auto;align-self:center}
+.rp-inline{display:block;margin:.35em 0 .2em;font-size:.8em;padding:3px 8px}
+#rag-drawer{position:fixed;top:0;right:0;height:100vh;width:min(560px,100vw);background:#fbfcf7;border-left:1px solid #e1e6d7;box-shadow:-12px 0 32px #0001;transform:translateX(105%);transition:transform .22s ease;z-index:50;display:flex;flex-direction:column}
+#rag-drawer.open{transform:none}
+#rag-drawer .rp-head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 20px 10px;border-bottom:1px solid #e1e6d7}
+#rag-drawer .rp-head h2{margin:.15em 0 0;font-size:20px}
+#rag-drawer .dialog-close{position:static}
+#rag-drawer-body{overflow:auto;padding:14px 20px 28px;font-size:13px;line-height:1.45}
+.rp-q{font-style:italic;color:#4d5a47;margin:0 0 10px}
+.rp-col{border:1px solid #e1e6d7;border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fff}
+.rp-col.graph{border-left:3px solid #3d5a32}.rp-col.plain{border-left:3px solid #b8a27a}
+.rp-col h3,.rp-explain h3,.rp-limits h3{margin:0 0 8px;font-size:13px;letter-spacing:.02em}
+.rp-col h3 small{font-weight:400;color:#718369;margin-left:6px}
+.rp-steps,.rp-passages{margin:0;padding-left:20px}.rp-steps li,.rp-passages li{margin-bottom:9px}
+.rp-step-title{font-weight:600;color:#2f553a}.rp-concept{font-size:11px;color:#718369;margin:1px 0 3px}
+.rp-call{margin:3px 0}.rp-call pre{white-space:pre-wrap;font-size:10.5px;background:#f3f5ec;padding:6px;border-radius:6px;max-height:160px;overflow:auto}
+.rp-tag{display:inline-block;padding:0 6px;border-radius:999px;font-size:10px;background:#e6edd8;color:#2f553a}
+.rp-contrast{background:#f6ead2;color:#7a5a1e;border-radius:8px;padding:6px 9px;margin:8px 0 0}
+.rp-empty{color:#718369}
+.rp-explain table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px}
+.rp-explain td,.rp-explain th{border-top:1px solid #e1e6d7;padding:5px 6px;text-align:left;vertical-align:top}
+.rp-explain th{color:#718369;font-weight:600}
+.rp-limits ul{margin:0;padding-left:18px}.rp-limits li{margin-bottom:6px;color:#4d5a47}
